@@ -1,0 +1,625 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时基金涨跌估值</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'up': '#f87171', 'down': '#4ade80',
+                        'cyan': '#22d3ee', 'cyber-blue': '#06b6d4',
+                        'surface': '#0b1120', 'card': '#111827',
+                        'border': '#1e293b', 'muted': '#64748b',
+                        'text-primary': '#e2e8f0', 'text-secondary': '#94a3b8',
+                    },
+                    fontFamily: { mono: ['JetBrains Mono','Fira Code','Cascadia Code','Consolas','monospace'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        :root {
+            --cyan: #22d3ee;
+            --glow-cyan: 0 0 20px rgba(34,211,238,0.15), 0 0 60px rgba(34,211,238,0.05);
+            --glow-red: 0 0 20px rgba(248,113,113,0.12), 0 0 60px rgba(248,113,113,0.04);
+            --glow-green: 0 0 20px rgba(74,222,128,0.12), 0 0 60px rgba(74,222,128,0.04);
+        }
+        * { margin:0;padding:0;box-sizing:border-box }
+        body {
+            font-family: -apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+            background: #0b1120;
+            color: #e2e8f0;
+        }
+        /* Grid overlay */
+        body::before {
+            content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+            background:
+                linear-gradient(rgba(34,211,238,0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(34,211,238,0.015) 1px, transparent 1px);
+            background-size: 60px 60px;
+            mask-image: radial-gradient(ellipse at 50% 0%, #000 40%, transparent 70%);
+        }
+        main, header, footer { position: relative; z-index: 1; }
+        /* Cards */
+        .card {
+            background: linear-gradient(135deg, rgba(17,24,39,0.95) 0%, rgba(15,23,42,0.9) 100%);
+            border: 1px solid rgba(30,41,59,0.8);
+            border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+            backdrop-filter: blur(8px);
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .card:hover { border-color: rgba(34,211,238,0.2); box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-cyan); }
+        .card-glow-cyan { box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-cyan); border-color: rgba(34,211,238,0.25); }
+        .card-glow-up { box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-red); border-color: rgba(248,113,113,0.2); }
+        .card-glow-down { box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-green); border-color: rgba(74,222,128,0.2); }
+        /* Stat card */
+        .stat-card {
+            background: rgba(17,24,39,0.8);
+            border: 1px solid rgba(30,41,59,0.6);
+            border-radius: 8px;
+            padding: 8px 12px;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+        .stat-card:hover { border-color: rgba(34,211,238,0.3); }
+        .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+        .stat-value { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono','Fira Code',Consolas,monospace; }
+        /* Colors */
+        .up { color: #f87171; } .down { color: #4ade80; }
+        .bg-up { background: rgba(248,113,113,0.08); } .bg-down { background: rgba(74,222,128,0.06); }
+        .text-cyan { color: #22d3ee; } .border-cyan { border-color: #22d3ee; }
+        /* Pulse dot */
+        .pulse-dot { width:7px;height:7px;border-radius:50%;background:#22d3ee;display:inline-block;margin-right:6px;
+            animation:pulse 1.5s infinite; box-shadow:0 0 8px rgba(34,211,238,0.5); }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+        /* Price flash */
+        .price-flash { animation:flashBg .6s ease-out }
+        @keyframes flashBg { 0%{background:rgba(34,211,238,0.15)} 100%{background:transparent} }
+        /* Sort */
+        .sort-icon { cursor:pointer;user-select:none;transition:color .2s }
+        .sort-icon:hover { color:#22d3ee }
+        /* Inputs */
+        input { background:rgba(15,23,42,.8);border:1px solid rgba(51,65,85,.8);color:#e2e8f0;border-radius:8px;padding:7px 12px;font-size:13px;transition:all .2s; }
+        input::placeholder { color:#475569 }
+        input:focus { outline:none;border-color:#22d3ee;box-shadow:0 0 0 2px rgba(34,211,238,.1),0 0 12px rgba(34,211,238,.08) }
+        /* Buttons */
+        .btn { padding:7px 14px;font-size:13px;border-radius:8px;font-weight:500;cursor:pointer;transition:all .2s;border:none;display:inline-flex;align-items:center;gap:5px }
+        .btn:active { transform:scale(.96) }
+        .btn-primary { background:linear-gradient(135deg,#06b6d4,#0891b2);color:#fff;box-shadow:0 0 20px rgba(6,182,212,.2) }
+        .btn-primary:hover { box-shadow:0 0 30px rgba(6,182,212,.35);transform:translateY(-1px) }
+        .btn-accent { background:linear-gradient(135deg,#10b981,#059669);color:#fff;box-shadow:0 0 20px rgba(16,185,129,.2) }
+        .btn-accent:hover { box-shadow:0 0 30px rgba(16,185,129,.35);transform:translateY(-1px) }
+        .btn-ghost { background:transparent;border:1px solid #334155;color:#94a3b8 }
+        .btn-ghost:hover { border-color:#64748b;color:#e2e8f0 }
+        .btn-danger { background:transparent;border:1px solid rgba(248,113,113,.3);color:#f87171;font-size:15px;line-height:1;padding:2px 6px;border-radius:4px }
+        .btn-danger:hover { background:rgba(248,113,113,.1);border-color:#f87171 }
+        /* Scrollbar */
+        ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:#0b1120}::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+        /* Glitch text */
+        .glitch { text-shadow:0 0 10px rgba(34,211,238,.4),0 0 30px rgba(34,211,238,.15) }
+        /* Scan line */
+        .scan-line { position:relative;overflow:hidden }
+        .scan-line::after { content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(34,211,238,.15),transparent);animation:scan 3s linear infinite }
+        @keyframes scan { 0%{top:0} 100%{top:100%} }
+        @media(max-width:768px){.mobile-stack{grid-template-columns:1fr!important}}
+    </style>
+</head>
+<body>
+    <header class="bg-[#111827]/90 border-b border-[#1e293b] backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <svg class="w-6 h-6 text-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                </svg>
+                <h1 class="text-lg font-bold text-[#e2e8f0] glitch">实时基金涨跌估值</h1>
+                <span id="marketStatus" class="text-xs px-2 py-0.5 rounded-full font-medium bg-[#1e293b] text-[#94a3b8] border border-[#334155]">--</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="headerTime" class="text-xs text-[#475569] font-mono hidden md:inline"></span>
+                <button id="refreshBtn" onclick="App.refreshAll()" class="btn btn-primary text-xs">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>刷新
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-4 space-y-4">
+        <!-- Index Main Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="card p-4" id="cardPrice">
+                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">上证指数</div>
+                <div class="text-2xl font-bold font-mono" id="idxPrice">--</div>
+                <div class="text-[10px] mt-1 text-[#475569] font-mono" id="idxName">SH.000001</div>
+            </div>
+            <div class="card p-4" id="cardChange">
+                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">涨跌额</div>
+                <div class="text-2xl font-bold font-mono" id="idxChange">--</div>
+                <div class="text-[10px] mt-1 text-[#475569]" id="idxChangeAmt">--</div>
+            </div>
+            <div class="card p-4" id="cardPct">
+                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">涨跌幅</div>
+                <div class="text-2xl font-bold font-mono" id="idxPct">--</div>
+                <div id="idxPctBar" class="mt-1"></div>
+            </div>
+            <div class="card p-4" id="cardAmt">
+                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">成交额</div>
+                <div class="text-2xl font-bold font-mono" id="idxAmount">--</div>
+                <div class="text-[10px] mt-1 text-[#475569]" id="idxVolInfo">--</div>
+            </div>
+        </div>
+
+        <!-- Extended Index Indicators -->
+        <div class="card p-3">
+            <div class="flex items-center gap-2 mb-2">
+                <span class="w-1 h-3 bg-cyan rounded-full"></span>
+                <span class="text-xs text-[#94a3b8] tracking-wider uppercase">市场指标</span>
+            </div>
+            <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-11 gap-1.5">
+                <div class="stat-card"><div class="stat-label">今开</div><div class="stat-value up" id="idxOpen">--</div></div>
+                <div class="stat-card"><div class="stat-label">昨收</div><div class="stat-value text-[#cbd5e1]" id="idxPre">--</div></div>
+                <div class="stat-card"><div class="stat-label">最高</div><div class="stat-value up" id="idxHigh">--</div></div>
+                <div class="stat-card"><div class="stat-label">最低</div><div class="stat-value down" id="idxLow">--</div></div>
+                <div class="stat-card"><div class="stat-label">成交量</div><div class="stat-value text-[#cbd5e1]" id="idxVol">--</div></div>
+                <div class="stat-card"><div class="stat-label">成交额</div><div class="stat-value text-[#cbd5e1]" id="idxAmount2">--</div></div>
+                <div class="stat-card"><div class="stat-label">振幅</div><div class="stat-value text-[#cbd5e1]" id="idxAmplitude">--</div></div>
+                <div class="stat-card"><div class="stat-label">换手率</div><div class="stat-value text-[#cbd5e1]" id="idxTurnover">--</div></div>
+                <div class="stat-card"><div class="stat-label">上涨</div><div class="stat-value up" id="idxUp">--</div></div>
+                <div class="stat-card"><div class="stat-label">平盘</div><div class="stat-value text-[#94a3b8]" id="idxFlat">--</div></div>
+                <div class="stat-card"><div class="stat-label">下跌</div><div class="stat-value down" id="idxDown">--</div></div>
+            </div>
+        </div>
+        <!-- Chart -->
+        <div class="card p-4 scan-line" id="chartCard">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <h2 class="text-sm font-semibold text-[#e2e8f0] flex items-center gap-2">
+                    <span class="pulse-dot" id="chartLiveDot" style="display:none"></span>上证指数 · 分时走势
+                </h2>
+                <span id="chartUpdateTime" class="text-[10px] text-[#475569] font-mono">--</span>
+            </div>
+            <div class="relative" style="height:380px"><canvas id="sseChart"></canvas></div>
+            <div class="flex justify-center gap-4 mt-2 text-[10px] text-[#334155]">
+                <span>━ 昨收参考线</span><span>点击图例切换</span>
+            </div>
+        </div>
+
+        <!-- Fund Search & Add -->
+        <div class="card p-4">
+            <div class="flex items-center gap-3 flex-wrap">
+                <span class="w-1 h-4 bg-cyan rounded-full"></span>
+                <h2 class="text-sm font-semibold text-[#e2e8f0]">添加基金</h2>
+                <div class="flex items-center gap-2 flex-1 flex-wrap">
+                    <input id="fundSearchInput" type="text" placeholder="基金代码" maxlength="6" class="w-28"
+                        onkeydown="if(event.key==='Enter')App.searchFund()">
+                    <button onclick="App.searchFund()" class="btn btn-primary text-xs">查询</button>
+                    <span id="fundSearchResult" class="text-xs text-[#94a3b8]"></span>
+                    <input id="fundAmountInput" type="number" placeholder="金额" class="w-28" disabled min="1" step="1"
+                        onkeydown="if(event.key==='Enter')App.addFund()">
+                    <button id="fundAddBtn" onclick="App.addFund()" class="btn btn-accent text-xs" disabled>+ 添加</button>
+                </div>
+                <button onclick="App.resetFunds()" class="btn btn-ghost text-xs">重置</button>
+            </div>
+        </div>
+
+        <!-- Fund Table -->
+        <div class="card p-4">
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h2 class="text-sm font-semibold text-[#e2e8f0] flex items-center gap-2">
+                    <span class="w-1 h-4 bg-cyan rounded-full"></span>持有基金估值
+                </h2>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span id="fundUpdateTime" class="text-[10px] text-[#475569] font-mono">--</span>
+                    <span class="text-[10px] text-[#334155] hidden md:inline">| 天天基金实时估值</span>
+                </div>
+            </div>
+            <div class="overflow-x-auto -mx-1">
+                <table class="w-full text-sm" id="fundTable">
+                    <thead>
+                        <tr class="border-b border-[#1e293b] text-left text-[11px] text-[#64748b] uppercase tracking-wider">
+                            <th class="pb-2 pr-2 whitespace-nowrap">代码<span class="sort-icon ml-1" data-col="0">↕</span></th>
+                            <th class="pb-2 pr-2">基金名称</th>
+                            <th class="pb-2 pr-2 text-right whitespace-nowrap">持有金额<span class="sort-icon ml-1" data-col="2">↕</span></th>
+                            <th class="pb-2 pr-2 text-right whitespace-nowrap">估算净值<span class="sort-icon ml-1" data-col="3">↕</span></th>
+                            <th class="pb-2 pr-2 text-right whitespace-nowrap">涨幅<span class="sort-icon ml-1" data-col="4">↕</span></th>
+                            <th class="pb-2 pr-2 text-right whitespace-nowrap">估算收益<span class="sort-icon ml-1" data-col="5">↕</span></th>
+                            <th class="pb-2 pr-2 text-right whitespace-nowrap">估算总值<span class="sort-icon ml-1" data-col="6">↕</span></th>
+                            <th class="pb-2 w-6"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="fundTableBody">
+                        <tr><td colspan="8" class="py-8 text-center text-[#475569] font-mono text-xs">// 加载基金数据中 ...</td></tr>
+                    </tbody>
+                    <tfoot id="fundTableFoot" class="border-t-2 border-[#1e293b] font-semibold"></tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- Algorithm Info -->
+        <div class="card p-4">
+            <h2 class="text-sm font-semibold text-[#e2e8f0] mb-2 flex items-center gap-2">
+                <span class="w-1 h-4 bg-cyan rounded-full"></span>估算算法
+            </h2>
+            <div class="grid md:grid-cols-2 gap-3 text-[11px] text-[#64748b] leading-relaxed">
+                <div class="space-y-1">
+                    <p><span class="text-[#94a3b8] font-medium">行情</span> 东方财富 push2.eastmoney.com</p>
+                    <p><span class="text-[#94a3b8] font-medium">分时</span> 东方财富 push2his.eastmoney.com</p>
+                    <p><span class="text-[#94a3b8] font-medium">估值</span> 天天基金 fundgz.1234567.com.cn</p>
+                </div>
+                <div class="space-y-1">
+                    <p><span class="text-[#94a3b8] font-medium">方法</span> 季报重仓股实时涨跌幅加权计算</p>
+                    <p><span class="text-[#94a3b8] font-medium">收益</span> 估算收益 = 持有金额 × 涨跌幅%</p>
+                    <p><span class="text-[#94a3b8] font-medium">刷新</span> 交易时段 <span class="font-mono text-cyan">10s</span> / 非交易 <span class="font-mono">60s</span></p>
+                </div>
+            </div>
+            <p class="text-[10px] text-[#475569] mt-3 border-t border-[#1e293b] pt-2">⚠ 估值仅供参考，实际净值以基金公司公布为准。交易时间：工作日 9:30-11:30, 13:00-15:00</p>
+        </div>
+    </main>
+
+    <footer class="text-center py-4 text-[10px] text-[#334155] border-t border-[#111827] font-mono">
+        <div>EASTMONEY · TTFUND · <span id="footerTime">--</span></div>
+        <div class="mt-1">估值仅供参考 不构成投资建议</div>
+    </footer>
+    <script>
+    /* ================================================================
+       基金实时估值 v2 - Sci-Fi Dark Theme
+       ================================================================ */
+    var DEFAULT_FUNDS = [
+        { code:'161725', amount:10000 },
+        { code:'005827', amount:20000 },
+        { code:'320007', amount:15000 },
+        { code:'001475', amount:12000 },
+        { code:'012414', amount:8000  },
+    ];
+    var STORAGE_KEY = 'fund_realtime_v2';
+
+    function loadFundConfig() {
+        try { var r=localStorage.getItem(STORAGE_KEY);if(r){var p=JSON.parse(r);if(Array.isArray(p)&&p.length>0)return p;} }catch(e){}
+        return DEFAULT_FUNDS.slice();
+    }
+    function saveFundConfig(c){ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(c));}catch(e){} }
+    var FUND_CONFIG = loadFundConfig();
+
+    function $(s){return document.querySelector(s)}
+    function $$(s){return document.querySelectorAll(s)}
+    function fm(n,d){if(n==null||isNaN(n))return'--';return Number(n).toFixed(d||2)}
+    function fmtM(n){if(n==null||isNaN(n))return'--';var a=Math.abs(n);if(a>=1e8)return(n/1e8).toFixed(2)+'亿';if(a>=1e4)return(n/1e4).toFixed(2)+'万';return n.toFixed(2)}
+    function sg(n){return n>0?'+':''}
+    function ts(){
+        var d=new Date();
+        return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+
+            String(d.getDate()).padStart(2,'0')+' '+
+            String(d.getHours()).padStart(2,'0')+':'+
+            String(d.getMinutes()).padStart(2,'0')+':'+
+            String(d.getSeconds()).padStart(2,'0');
+    }
+    function isTD(d){var dy=d.getDay();return dy>=1&&dy<=5}
+    function isTT(d){if(!isTD(d))return false;var t=d.getHours()*60+d.getMinutes();return(t>=570&&t<690)||(t>=780&&t<900)}
+    function gMS(d){
+        if(isTT(d))return{text:'交易中',cls:'bg-cyan-900/40 text-cyan border border-cyan-800/50',live:true};
+        var t=d.getHours()*60+d.getMinutes();
+        if(isTD(d)){
+            if(t>=555&&t<570)return{text:'集合竞价',cls:'bg-yellow-900/40 text-yellow-400 border border-yellow-800/50',live:false};
+            if(t<555)return{text:'未开盘',cls:'bg-[#1e293b] text-[#94a3b8] border border-[#334155]',live:false};
+            if(t>=900)return{text:'已收盘',cls:'bg-[#1e293b] text-[#94a3b8] border border-[#334155]',live:false};
+        }
+        return{text:'休市',cls:'bg-[#1e293b] text-[#94a3b8] border border-[#334155]',live:false};
+    }
+    </script>
+    <script>
+    /* ---------- API ---------- */
+    var API = {
+        getSSEQuote:function(){
+            var u='https://push2.eastmoney.com/api/qt/stock/get?secid=1.000001'+
+                '&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f116,f117,f167,f104,f105,f106';
+            return fetch(u,{cache:'no-cache'}).then(function(r){return r.json()}).then(function(j){
+                if(!j||!j.data)throw new Error('SSE empty');return j.data;
+            });
+        },
+        getSSETrend:function(){
+            var u='https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=1.000001'+
+                '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'+
+                '&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0&iscca=0';
+            return fetch(u,{cache:'no-cache'}).then(function(r){return r.json()}).then(function(j){
+                if(!j||!j.data)throw new Error('Trend empty');return j.data;
+            });
+        },
+        getFundEstimate:function(code){
+            return new Promise(function(rs,rj){
+                var cb='__jz_'+code+'_'+Date.now(),sc=document.createElement('script'),dn=false;
+                var to=setTimeout(function(){if(!dn){dn=true;cl();rj(new Error('Timeout:'+code))}},8000);
+                function cl(){clearTimeout(to);delete window[cb];if(sc.parentNode)sc.parentNode.removeChild(sc)}
+                window[cb]=function(d){if(!dn){dn=true;cl();rs(d)}};
+                sc.onerror=function(){if(!dn){dn=true;cl();rj(new Error('Failed:'+code))}};
+                var o=window.jsonpgz;window.jsonpgz=function(d){if(window[cb])window[cb](d);window.jsonpgz=o;};
+                sc.src='https://fundgz.1234567.com.cn/js/'+code+'.js?rt='+Date.now();
+                document.head.appendChild(sc);
+            });
+        },
+        getFundEstimates:async function(codes){
+            var r=[];for(var i=0;i<codes.length;i++){
+                try{var d=await this.getFundEstimate(codes[i]);r.push({code:codes[i],data:d,error:null})}
+                catch(e){r.push({code:codes[i],data:null,error:e.message})}
+                await new Promise(function(x){setTimeout(x,150)})
+            }return r;
+        }
+    };
+    </script>
+    <script>
+    /* ---------- Chart (Sci-Fi) ---------- */
+    var sseChart=null;
+    var ChartMgr={
+        init:function(){
+            Chart.defaults.color='#64748b';Chart.defaults.borderColor='#1e293b';
+            Chart.defaults.plugins.tooltip.backgroundColor='rgba(17,24,39,.95)';
+            Chart.defaults.plugins.tooltip.titleColor='#22d3ee';
+            Chart.defaults.plugins.tooltip.bodyColor='#cbd5e1';
+            Chart.defaults.plugins.tooltip.borderColor='#334155';
+            Chart.defaults.plugins.tooltip.borderWidth=1;
+            Chart.defaults.plugins.tooltip.padding=10;
+            Chart.defaults.plugins.tooltip.cornerRadius=6;
+
+            var ctx=document.getElementById('sseChart').getContext('2d');
+            sseChart=new Chart(ctx,{
+                type:'line',
+                data:{labels:[],datasets:[
+                    {label:'上证指数',data:[],borderColor:'#22d3ee',borderWidth:1.5,
+                        backgroundColor:function(ctx){var g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
+                            g.addColorStop(0,'rgba(34,211,238,.12)');g.addColorStop(1,'rgba(34,211,238,0)');return g;},
+                        fill:true,pointRadius:0,pointHoverRadius:5,pointHoverBackgroundColor:'#22d3ee',pointHoverBorderColor:'#0b1120',pointHoverBorderWidth:2,tension:.15,order:1},
+                    {label:'昨收',data:[],borderColor:'#334155',borderWidth:1,borderDash:[6,4],pointRadius:0,fill:false,order:2}
+                ]},
+                options:{
+                    responsive:true,maintainAspectRatio:false,animation:{duration:300},
+                    interaction:{intersect:false,mode:'index'},
+                    plugins:{legend:{display:true,position:'top',labels:{boxWidth:16,usePointStyle:true,padding:20,font:{size:10},color:'#64748b'}},
+                        tooltip:{callbacks:{label:function(c){return c.datasetIndex===0?'指数: '+c.parsed.y.toFixed(2):'昨收: '+c.parsed.y.toFixed(2)}}}},
+                    scales:{
+                        x:{ticks:{maxTicksLimit:14,font:{size:9},color:'#475569',
+                            callback:function(v,i){var l=this.getLabelForValue(v);if(!l)return'';var p=l.split(' ');return p.length>1?p[1].slice(0,5):l}},grid:{color:'rgba(30,41,59,.5)'}},
+                        y:{ticks:{font:{size:9},color:'#475569',callback:function(v){return v.toFixed(0)}},grid:{color:'rgba(30,41,59,.5)'}}
+                    }
+                }
+            });
+        },
+        update:function(tr,pre){
+            if(!sseChart)return;
+            if(!tr||!tr.length){sseChart.data.labels=[];sseChart.data.datasets[0].data=[];sseChart.data.datasets[1].data=[];sseChart.update('none');return}
+            var lb=[],pr=[],rl=[];
+            for(var i=0;i<tr.length;i++){var p=tr[i].split(',');if(p.length<2)continue;lb.push(p[0]);pr.push(parseFloat(p[1]))}
+            for(var j=0;j<lb.length;j++)rl.push(pre);
+            var lp=pr[pr.length-1],isUp=lp>=pre;
+            var lc=isUp?'#f87171':'#4ade80',fc=isUp?'rgba(248,113,113,.08)':'rgba(74,222,128,.06)';
+            sseChart.data.labels=lb;sseChart.data.datasets[0].data=pr;
+            sseChart.data.datasets[0].borderColor=lc;sseChart.data.datasets[0].pointHoverBackgroundColor=lc;
+            sseChart.data.datasets[1].data=rl;
+            // update gradient
+            sseChart.data.datasets[0].backgroundColor=function(ctx){
+                var g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
+                g.addColorStop(0,isUp?'rgba(248,113,113,.12)':'rgba(74,222,128,.08)');
+                g.addColorStop(1,'rgba(0,0,0,0)');return g;
+            };
+            sseChart.update('none');
+        }
+    };
+    </script>
+    <script>
+    /* ---------- UI ---------- */
+    var UI={
+        _fd:[],_sd:'desc',_lsp:null,
+
+        updateIndexCards:function(q){
+            if(!q)return;
+            var p=q.f43,pc=q.f60,hi=q.f44,lo=q.f45,op=q.f46;
+            var ch=q.f116||(p-pc),pct=q.f117,amt=q.f48/1e8,vl=q.f47/10000;
+            var tov=q.f167,upn=q.f104,flt=q.f105,dwn=q.f106;
+            var amp=pc?((hi-lo)/pc*100):null;
+            var name=q.f58||'上证指数';
+
+            var cls=pct>0?'up':pct<0?'down':'';
+
+            // Main cards
+            var ep=$('#idxPrice');ep.textContent=fm(p);ep.className='text-2xl font-bold font-mono '+cls;
+            if(UI._lsp!==null&&pct!==UI._lsp){ep.classList.add('price-flash');setTimeout(function(){ep.classList.remove('price-flash')},600)}
+            UI._lsp=pct;
+            $('#idxName').textContent=name+' · '+(q.f57||'000001');
+            $('#idxChange').textContent=sg(ch)+fm(ch);$('#idxChange').className='text-2xl font-bold font-mono '+cls;
+            $('#idxChangeAmt').textContent='昨收 '+fm(pc);
+            $('#idxPct').textContent=sg(pct)+fm(pct)+'%';$('#idxPct').className='text-2xl font-bold font-mono '+cls;
+            var bw=Math.min(Math.abs(pct),10),bc=pct>0?'#f87171':pct<0?'#4ade80':'#475569';
+            $('#idxPctBar').innerHTML='<span style="display:inline-block;height:3px;border-radius:2px;width:'+(bw*10)+'%;background:'+bc+';min-width:2px;box-shadow:0 0 8px '+bc+'44"></span>';
+            $('#idxAmount').textContent=fm(amt,0);$('#idxVolInfo').textContent='量比 '+fm(q.f50,2);
+
+            // Glowing card border
+            var cc=$('#cardPrice'),cp=$('#cardPct'),cam=$('#cardAmt'),cch=$('#cardChange');
+            [cc,cp,cam,cch].forEach(function(c){c.className='card p-4'});
+            if(cls==='up'){cp.classList.add('card-glow-up');cc.classList.add('card-glow-up')}
+            else if(cls==='down'){cp.classList.add('card-glow-down');cc.classList.add('card-glow-down')}
+
+            // Extended indicators
+            $('#idxOpen').textContent=fm(op);$('#idxPre').textContent=fm(pc);
+            $('#idxHigh').textContent=fm(hi);$('#idxLow').textContent=fm(lo);
+            $('#idxVol').textContent=fm(vl,0)+'万手';
+            $('#idxAmount2').textContent=fm(q.f48/1e8,2)+'亿';
+            $('#idxAmplitude').textContent=amp!=null?fm(amp,2)+'%':'--';
+            $('#idxTurnover').textContent=tov?fm(tov,2)+'%':'--';
+            // Up/flat/down counts
+            $('#idxUp').textContent=upn!=null?upn:'--';
+            $('#idxFlat').textContent=flt!=null?flt:'--';
+            $('#idxDown').textContent=dwn!=null?dwn:'--';
+            $('#idxUp').className='stat-value up';
+            $('#idxDown').className='stat-value down';
+            $('#idxFlat').className='stat-value text-[#94a3b8]';
+        },
+
+        updateFundTable:function(ests){
+            var tb=$('#fundTableBody'),tf=$('#fundTableFoot'),rows='',ta=0,tp=0,fr=[];
+            for(var i=0;i<ests.length;i++){
+                var e=ests[i],cfg=null;
+                for(var j=0;j<FUND_CONFIG.length;j++){if(FUND_CONFIG[j].code===e.code){cfg=FUND_CONFIG[j];break}}
+                if(!cfg)continue;
+                var d=e.data,nm=d?(d.name||'基金'+e.code):('基金'+e.code),am=cfg.amount;
+                var nv=null,pt=null,pf=null,va=null;
+                if(d){nv=parseFloat(d.gsz)||null;pt=parseFloat(d.gszzl);if(isNaN(pt))pt=0;pf=am*pt/100;va=am+pf}
+                ta+=am;tp+=(pf||0);
+                var pc=pt>0?'up':pt<0?'down':'',pfc=pf>0?'up':pf<0?'down':'';
+                fr.push({code:e.code,name:nm,amount:am,estNAV:nv,estPct:pt,estProfit:pf,estValue:va});
+                rows+='<tr class="border-b border-[#111827] hover:bg-[#111827] transition-colors">'+
+                    '<td class="py-2.5 pr-2 font-mono text-[#64748b]">'+e.code+'</td>'+
+                    '<td class="py-2.5 pr-2 max-w-[110px] truncate text-[#e2e8f0]" title="'+nm+'">'+nm+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-mono text-[#cbd5e1]">&yen;'+fm(am,0)+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-mono text-xs '+(nv?'text-[#cbd5e1]':'text-[#475569]')+'">'+(nv?'&yen;'+fm(nv,4):'--')+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-semibold '+pc+'">'+(pt!=null?sg(pt)+fm(pt)+'%':'<span class="text-[#475569]">--</span>')+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-semibold '+pfc+'">'+(pf!=null?sg(pf)+'&yen;'+fm(Math.abs(pf),2):'<span class="text-[#475569]">--</span>')+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-semibold font-mono">'+(va!=null?'&yen;'+fm(va,2):'<span class="text-[#475569]">--</span>')+'</td>'+
+                    '<td class="py-2.5 text-center"><button onclick="App.removeFund(\''+e.code+'\')" class="btn-danger" title="移除">&times;</button></td>'+
+                '</tr>';
+            }
+            tb.innerHTML=rows||'<tr><td colspan="8" class="py-8 text-center text-[#475569] font-mono text-xs">// 暂无基金，请添加</td></tr>';
+            var tc=tp>0?'up':tp<0?'down':'',tv=ta+tp;
+            tf.innerHTML='<tr>'+
+                '<td colspan="2" class="py-2.5 pr-2 text-xs text-[#94a3b8]">合计</td>'+
+                '<td class="py-2.5 pr-2 text-right font-mono">&yen;'+fm(ta,0)+'</td>'+
+                '<td class="py-2.5 pr-2"></td><td class="py-2.5 pr-2"></td>'+
+                '<td class="py-2.5 pr-2 text-right font-bold '+tc+'">'+sg(tp)+'&yen;'+fm(Math.abs(tp),2)+'</td>'+
+                '<td class="py-2.5 pr-2 text-right font-bold font-mono">&yen;'+fm(tv,2)+'</td><td></td></tr>';
+            UI._fd=fr;
+        },
+
+        sortFundTable:function(col){
+            var d=UI._fd;if(!d.length)return;
+            var ks=['code','name','amount','estNAV','estPct','estProfit','estValue'],k=ks[col];
+            var asc=UI._sd==='asc';UI._sd=asc?'desc':'asc';
+            d.sort(function(a,b){var va=a[k],vb=b[k];if(va==null)va=asc?-Infinity:Infinity;if(vb==null)vb=asc?-Infinity:Infinity;if(typeof va==='string')return asc?va.localeCompare(vb):vb.localeCompare(va);return asc?va-vb:vb-va});
+            var tb=$('#fundTableBody'),rs='';
+            for(var i=0;i<d.length;i++){
+                var r=d[i],pc=r.estPct>0?'up':r.estPct<0?'down':'',pfc=r.estProfit>0?'up':r.estProfit<0?'down':'';
+                rs+='<tr class="border-b border-[#111827] hover:bg-[#111827] transition-colors">'+
+                    '<td class="py-2.5 pr-2 font-mono text-[#64748b]">'+r.code+'</td>'+
+                    '<td class="py-2.5 pr-2 max-w-[110px] truncate text-[#e2e8f0]">'+r.name+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-mono text-[#cbd5e1]">&yen;'+fm(r.amount,0)+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-mono text-xs">'+(r.estNAV?'&yen;'+fm(r.estNAV,4):'--')+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-semibold '+pc+'">'+(r.estPct!=null?sg(r.estPct)+fm(r.estPct)+'%':'--')+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-semibold '+pfc+'">'+(r.estProfit!=null?sg(r.estProfit)+'&yen;'+fm(Math.abs(r.estProfit),2):'--')+'</td>'+
+                    '<td class="py-2.5 pr-2 text-right font-semibold font-mono">'+(r.estValue!=null?'&yen;'+fm(r.estValue,2):'--')+'</td>'+
+                    '<td class="py-2.5 text-center"><button onclick="App.removeFund(\''+r.code+'\')" class="btn-danger" title="移除">&times;</button></td></tr>';
+            }
+            tb.innerHTML=rs;
+        },
+
+        updateTimes:function(){
+            var t=ts();$('#chartUpdateTime').textContent=t;$('#fundUpdateTime').textContent=t;
+            $('#footerTime').textContent=t;$('#headerTime').textContent=t;
+        },
+        updateMarketStatus:function(){
+            var s=gMS(new Date()),el=$('#marketStatus');
+            el.textContent=s.text;el.className='text-xs px-2 py-0.5 rounded-full font-medium '+s.cls;
+            var d=$('#chartLiveDot');if(d)d.style.display=s.live?'inline-block':'none';
+        }
+    };
+    </script>
+    <script>
+    /* ---------- App ---------- */
+    var App={
+        _tm:null,_so:false,_fo:false,_sf:null,
+
+        init:function(){
+            ChartMgr.init();UI.updateMarketStatus();this._bindSort();
+            this.refreshAll().then(function(){console.log('[OK]',FUND_CONFIG.length,'funds loaded')});
+            this._startTimer();
+        },
+
+        _bindSort:function(){
+            var is=$$('.sort-icon');for(var i=0;i<is.length;i++){
+                is[i].addEventListener('click',function(){var c=parseInt(this.getAttribute('data-col'));UI.sortFundTable(c)})
+            }
+        },
+
+        /* Search */
+        searchFund:function(){
+            var input=$('#fundSearchInput'),code=input.value.trim(),re=$('#fundSearchResult'),
+                ai=$('#fundAmountInput'),ab=$('#fundAddBtn');
+            if(!/^\d{6}$/.test(code)){re.textContent='请输入6位数字基金代码';re.className='text-xs text-red-400';re.style.display='';ai.disabled=true;ab.disabled=true;this._sf=null;return}
+            re.textContent='查询中...';re.className='text-xs text-[#94a3b8]';re.style.display='';ai.disabled=true;ab.disabled=true;
+            var s=this;
+            API.getFundEstimate(code).then(function(d){
+                s._sf={code:code,name:d.name,data:d};
+                re.textContent='✓ '+d.name+' ('+code+')';re.className='text-xs text-cyan font-semibold';re.style.display='';
+                ai.disabled=false;ai.focus();ab.disabled=false;
+            }).catch(function(e){
+                s._sf=null;re.textContent='✗ 未找到该基金';re.className='text-xs text-red-400';re.style.display='';
+                ai.disabled=true;ab.disabled=true;
+            });
+        },
+
+        /* Add */
+        addFund:function(){
+            if(!this._sf)return;
+            var code=this._sf.code,ai=$('#fundAmountInput'),amt=parseFloat(ai.value);
+            if(!amt||isNaN(amt)||amt<=0){ai.focus();ai.style.borderColor='#f87171';setTimeout(function(){ai.style.borderColor=''},1500);return}
+            for(var i=0;i<FUND_CONFIG.length;i++){if(FUND_CONFIG[i].code===code){alert('该基金已在持仓列表中');return}}
+            FUND_CONFIG.push({code:code,amount:amt});saveFundConfig(FUND_CONFIG);
+            $('#fundSearchInput').value='';ai.value='';ai.disabled=true;ab.disabled=true;
+            $('#fundSearchResult').textContent='';
+            this._sf=null;this.refreshAll();
+        },
+
+        /* Remove */
+        removeFund:function(code){
+            FUND_CONFIG=FUND_CONFIG.filter(function(f){return f.code!==code});saveFundConfig(FUND_CONFIG);
+            if(FUND_CONFIG.length===0){FUND_CONFIG=DEFAULT_FUNDS.slice();saveFundConfig(FUND_CONFIG)}
+            this.refreshAll();
+        },
+
+        /* Reset */
+        resetFunds:function(){
+            if(!confirm('确定重置为默认基金列表？'))return;
+            FUND_CONFIG=DEFAULT_FUNDS.slice();saveFundConfig(FUND_CONFIG);
+            $('#fundSearchInput').value='';$('#fundAmountInput').value='';$('#fundAmountInput').style.display='none';
+            $('#fundSearchResult').style.display='none';$('#fundAddBtn').style.display='none';
+            this._sf=null;this.refreshAll();
+        },
+
+        /* Refresh */
+        refreshAll:function(){
+            var s=this,btn=$('#refreshBtn');btn.disabled=true;btn.classList.add('opacity-50');
+            return Promise.all([this._rSSE(),this._rFunds()]).then(function(){
+                UI.updateTimes();UI.updateMarketStatus();
+            }).catch(function(e){console.error('[ERR]',e)}).finally(function(){
+                btn.disabled=false;btn.classList.remove('opacity-50');
+            });
+        },
+
+        _rSSE:function(){
+            var s=this;
+            return Promise.all([API.getSSEQuote(),API.getSSETrend()]).then(function(r){
+                var q=r[0],t=r[1];s._so=true;UI.updateIndexCards(q);
+                var pp=t.prePrice;if(!pp&&q)pp=q.f60;ChartMgr.update(t.trends,pp);
+            }).catch(function(e){console.error('[SSE]',e.message);s._so=false});
+        },
+
+        _rFunds:function(){
+            var s=this,cs=[];for(var i=0;i<FUND_CONFIG.length;i++)cs.push(FUND_CONFIG[i].code);
+            return API.getFundEstimates(cs).then(function(e){s._fo=true;UI.updateFundTable(e)})
+                .catch(function(e){console.error('[FUND]',e.message);s._fo=false});
+        },
+
+        _startTimer:function(){
+            var s=this;if(s._tm)clearTimeout(s._tm);
+            function sc(){var iv=isTT(new Date())?10000:60000;
+                s._tm=setTimeout(function(){s.refreshAll().then(function(){sc()})},iv)}
+            sc();
+        }
+    };
+
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){App.init()});else App.init();
+    </script>
+</body>
+</html>
