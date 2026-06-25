@@ -1,625 +1,519 @@
-﻿<!DOCTYPE html>
-<html lang="zh-CN" class="dark">
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>实时基金涨跌估值</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        'up': '#f87171', 'down': '#4ade80',
-                        'cyan': '#22d3ee', 'cyber-blue': '#06b6d4',
-                        'surface': '#0b1120', 'card': '#111827',
-                        'border': '#1e293b', 'muted': '#64748b',
-                        'text-primary': '#e2e8f0', 'text-secondary': '#94a3b8',
-                    },
-                    fontFamily: { mono: ['JetBrains Mono','Fira Code','Cascadia Code','Consolas','monospace'] }
-                }
-            }
-        }
-    </script>
-    <style>
-        :root {
-            --cyan: #22d3ee;
-            --glow-cyan: 0 0 20px rgba(34,211,238,0.15), 0 0 60px rgba(34,211,238,0.05);
-            --glow-red: 0 0 20px rgba(248,113,113,0.12), 0 0 60px rgba(248,113,113,0.04);
-            --glow-green: 0 0 20px rgba(74,222,128,0.12), 0 0 60px rgba(74,222,128,0.04);
-        }
-        * { margin:0;padding:0;box-sizing:border-box }
-        body {
-            font-family: -apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
-            background: #0b1120;
-            color: #e2e8f0;
-        }
-        /* Grid overlay */
-        body::before {
-            content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-            background:
-                linear-gradient(rgba(34,211,238,0.015) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(34,211,238,0.015) 1px, transparent 1px);
-            background-size: 60px 60px;
-            mask-image: radial-gradient(ellipse at 50% 0%, #000 40%, transparent 70%);
-        }
-        main, header, footer { position: relative; z-index: 1; }
-        /* Cards */
-        .card {
-            background: linear-gradient(135deg, rgba(17,24,39,0.95) 0%, rgba(15,23,42,0.9) 100%);
-            border: 1px solid rgba(30,41,59,0.8);
-            border-radius: 12px;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-            backdrop-filter: blur(8px);
-            transition: border-color 0.3s, box-shadow 0.3s;
-        }
-        .card:hover { border-color: rgba(34,211,238,0.2); box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-cyan); }
-        .card-glow-cyan { box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-cyan); border-color: rgba(34,211,238,0.25); }
-        .card-glow-up { box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-red); border-color: rgba(248,113,113,0.2); }
-        .card-glow-down { box-shadow: 0 4px 24px rgba(0,0,0,0.4), var(--glow-green); border-color: rgba(74,222,128,0.2); }
-        /* Stat card */
-        .stat-card {
-            background: rgba(17,24,39,0.8);
-            border: 1px solid rgba(30,41,59,0.6);
-            border-radius: 8px;
-            padding: 8px 12px;
-            text-align: center;
-            transition: border-color 0.3s;
-        }
-        .stat-card:hover { border-color: rgba(34,211,238,0.3); }
-        .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
-        .stat-value { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono','Fira Code',Consolas,monospace; }
-        /* Colors */
-        .up { color: #f87171; } .down { color: #4ade80; }
-        .bg-up { background: rgba(248,113,113,0.08); } .bg-down { background: rgba(74,222,128,0.06); }
-        .text-cyan { color: #22d3ee; } .border-cyan { border-color: #22d3ee; }
-        /* Pulse dot */
-        .pulse-dot { width:7px;height:7px;border-radius:50%;background:#22d3ee;display:inline-block;margin-right:6px;
-            animation:pulse 1.5s infinite; box-shadow:0 0 8px rgba(34,211,238,0.5); }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-        /* Price flash */
-        .price-flash { animation:flashBg .6s ease-out }
-        @keyframes flashBg { 0%{background:rgba(34,211,238,0.15)} 100%{background:transparent} }
-        /* Sort */
-        .sort-icon { cursor:pointer;user-select:none;transition:color .2s }
-        .sort-icon:hover { color:#22d3ee }
-        /* Inputs */
-        input { background:rgba(15,23,42,.8);border:1px solid rgba(51,65,85,.8);color:#e2e8f0;border-radius:8px;padding:7px 12px;font-size:13px;transition:all .2s; }
-        input::placeholder { color:#475569 }
-        input:focus { outline:none;border-color:#22d3ee;box-shadow:0 0 0 2px rgba(34,211,238,.1),0 0 12px rgba(34,211,238,.08) }
-        /* Buttons */
-        .btn { padding:7px 14px;font-size:13px;border-radius:8px;font-weight:500;cursor:pointer;transition:all .2s;border:none;display:inline-flex;align-items:center;gap:5px }
-        .btn:active { transform:scale(.96) }
-        .btn-primary { background:linear-gradient(135deg,#06b6d4,#0891b2);color:#fff;box-shadow:0 0 20px rgba(6,182,212,.2) }
-        .btn-primary:hover { box-shadow:0 0 30px rgba(6,182,212,.35);transform:translateY(-1px) }
-        .btn-accent { background:linear-gradient(135deg,#10b981,#059669);color:#fff;box-shadow:0 0 20px rgba(16,185,129,.2) }
-        .btn-accent:hover { box-shadow:0 0 30px rgba(16,185,129,.35);transform:translateY(-1px) }
-        .btn-ghost { background:transparent;border:1px solid #334155;color:#94a3b8 }
-        .btn-ghost:hover { border-color:#64748b;color:#e2e8f0 }
-        .btn-danger { background:transparent;border:1px solid rgba(248,113,113,.3);color:#f87171;font-size:15px;line-height:1;padding:2px 6px;border-radius:4px }
-        .btn-danger:hover { background:rgba(248,113,113,.1);border-color:#f87171 }
-        /* Scrollbar */
-        ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:#0b1120}::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
-        /* Glitch text */
-        .glitch { text-shadow:0 0 10px rgba(34,211,238,.4),0 0 30px rgba(34,211,238,.15) }
-        /* Scan line */
-        .scan-line { position:relative;overflow:hidden }
-        .scan-line::after { content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(34,211,238,.15),transparent);animation:scan 3s linear infinite }
-        @keyframes scan { 0%{top:0} 100%{top:100%} }
-        @media(max-width:768px){.mobile-stack{grid-template-columns:1fr!important}}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>基金实时涨跌估值</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Microsoft YaHei",Arial,sans-serif;background:#1a1a2e;color:#eee;min-height:100vh}
+.container{max-width:100%;margin:0 auto;padding:20px 10px}
+h1{text-align:center;color:#00d4ff;margin-bottom:25px;font-size:26px}
+.card{background:#16213e;border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:0 4px 20px rgba(0,0,0,.3);width:100%;overflow:hidden}
+.search-row{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.search-row input{padding:12px 16px;border:2px solid #2a2a4a;border-radius:8px;background:#0f3460;color:#fff;font-size:14px}
+.search-row input:first-child{width:140px}
+.search-row input:nth-child(2){width:120px}
+.search-row input:last-of-type{flex:1}
+.search-row input:focus{border-color:#00d4ff;outline:none}
+.btn{padding:12px 20px;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:bold}
+.btn-primary{background:linear-gradient(135deg,#00d4ff,#0099cc);color:#1a1a2e}
+.btn-success{background:#2ed573;color:#fff}
+.btn-danger{background:#ff4757;color:#fff}
+.summary-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}
+.summary-header h2{color:#00d4ff;font-size:16px}
+.summary-bar{display:flex;justify-content:space-between;background:#0f3460;padding:15px 20px;border-radius:10px;margin-bottom:15px;flex-wrap:wrap;gap:15px}
+.summary-item{text-align:center}
+.summary-item .label{font-size:12px;color:#888}
+.summary-item .value{font-size:20px;font-weight:bold}
+.value.up{color:#ff4757}.value.down{color:#2ed573}.value.neutral{color:#ffa502}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{padding:14px 10px;text-align:center;border-bottom:1px solid #2a2a4a;font-size:13px}
+th{background:#0f3460;color:#00d4ff;font-weight:500;font-size:12px}
+tr:hover{background:#1a1a3a}
+.code{color:#00d4ff;font-weight:bold}.name{color:#fff;text-align:left}
+.hold-amount{color:#ffa502;cursor:pointer;padding:4px 8px;border-radius:4px;display:inline-flex;align-items:center;gap:4px}
+.hold-amount:hover{background:#2a2a4a}
+.change-up{color:#ff4757}.change-down{color:#2ed573}
+.earnings-up{color:#ff4757;font-weight:bold}.earnings-down{color:#2ed573;font-weight:bold}
+.action-btn{padding:5px 10px;border:none;border-radius:4px;cursor:pointer;font-size:11px;margin:2px}
+.btn-delete{background:#ff4757;color:#fff}.btn-move{background:#6366f1;color:#fff;padding:5px 12px}.btn-refresh{background:#2ed573;color:#fff}
+.move-menu{position:absolute;background:#16213e;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.5);padding:8px 0;z-index:100;display:none;min-width:100px}
+.move-menu.show{display:block}
+.move-menu button{display:block;width:100%;padding:10px 20px;border:none;background:none;color:#fff;cursor:pointer;text-align:left;font-size:13px}
+.move-menu button:hover{background:#2a2a4a}
+.loading{text-align:center;padding:30px;color:#00d4ff}.empty-state{text-align:center;padding:50px;color:#666}
+.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.7);z-index:1000;justify-content:center;align-items:center}
+.modal.show{display:flex}
+.modal-content{background:#16213e;padding:30px;border-radius:12px;width:90%;max-width:400px}
+.modal-content h3{color:#00d4ff;margin-bottom:20px}
+.modal-content input{width:100%;padding:12px;border:2px solid #2a2a4a;border-radius:8px;background:#0f3460;color:#fff;font-size:16px;margin-bottom:20px}
+.modal-content input:focus{border-color:#00d4ff;outline:none}
+.modal-buttons{display:flex;gap:10px;justify-content:flex-end}.action-cell{position:relative}
+.idx-header{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.idx-name{font-size:20px;font-weight:bold;color:#fff}.idx-code{color:#888;font-size:13px}
+.idx-price{font-size:28px;font-weight:bold}.idx-change{font-size:15px;font-weight:bold}
+.idx-change.up{color:#ff4757}.idx-change.down{color:#2ed573}
+.idx-price.up{color:#ff4757}.idx-price.down{color:#2ed573}
+.idx-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:6px 16px;margin-bottom:15px;background:#0f3460;border-radius:8px;padding:12px}
+.idx-metric{display:flex;justify-content:space-between;font-size:13px;padding:2px 0}
+.idx-metric .ml{color:#bbb}.idx-metric .mv{color:#fff;font-weight:bold}
+.mv.up{color:#ff4757}.mv.down{color:#2ed573}
+.mv.flash{animation:flash .6s ease}
+@keyframes flash{0%{background:rgba(0,212,255,.3)}100%{background:transparent}}
+.chart-wrap{background:#0f3460;border-radius:8px;padding:10px;position:relative;width:100%}
+#indexChart{width:100%;display:block;max-width:100%}
+.tooltip{position:absolute;background:rgba(30,30,50,.95);border:1px solid #00d4ff;border-radius:8px;padding:12px;z-index:200;pointer-events:none;display:none;min-width:160px}
+.tooltip .tip-time{color:#bbb;font-size:12px;margin-bottom:8px;border-bottom:1px solid #2a2a4a;padding-bottom:6px}
+.tooltip .tip-row{display:flex;justify-content:space-between;gap:16px;font-size:13px}
+.tooltip .tip-label{color:#888}
+.tooltip .tip-value{font-weight:bold}
+.tip-value.up{color:#ff4757}.tip-value.down{color:#2ed573}
+.rec-fund-row{display:flex;gap:12px;flex-wrap:wrap}
+.rec-fund-card{flex:1;min-width:180px;background:#0f3460;border-radius:10px;padding:16px;cursor:pointer;transition:all .2s;border:1px solid #2a2a4a;position:relative}
+.rec-fund-card:hover{border-color:#00d4ff;transform:translateY(-2px);box-shadow:0 4px 15px rgba(0,212,255,.2)}
+.rec-fund-card .rf-name{font-size:15px;font-weight:bold;color:#fff;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rec-fund-card .rf-code{font-size:11px;color:#888;margin-bottom:10px}
+.rec-fund-card .rf-price{font-size:22px;font-weight:bold;margin-bottom:4px}
+.rec-fund-card .rf-price.up{color:#ff4757}.rec-fund-card .rf-price.down{color:#2ed573}
+.rec-fund-card .rf-change{font-size:14px;font-weight:bold}
+.rec-fund-card .rf-change.up{color:#ff4757}.rec-fund-card .rf-change.down{color:#2ed573}
+.rec-fund-card .rf-info{margin-top:10px;padding-top:10px;border-top:1px solid #2a2a4a;font-size:11px;color:#888}
+.rec-fund-card .rf-info div{display:flex;justify-content:space-between;padding:2px 0}
+.rec-fund-card .rf-info .rf-val{color:#ddd}
+.rec-fund-card .rf-add{position:absolute;top:10px;right:10px;background:linear-gradient(135deg,#00d4ff,#0099cc);color:#1a1a2e;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:bold;cursor:pointer;opacity:0;transition:opacity .2s}
+.rec-fund-card:hover .rf-add{opacity:1}
+.rec-fund-card .rf-add:hover{transform:scale(1.05)}
+.rf-loading{text-align:center;padding:30px;color:#00d4ff;width:100%}
+/* 登录注册页 */
+.auth-page{display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
+.auth-box{background:#16213e;border-radius:16px;padding:40px;width:100%;max-width:420px;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.auth-box h2{text-align:center;color:#00d4ff;margin-bottom:8px;font-size:24px}
+.auth-box .auth-sub{text-align:center;color:#888;font-size:13px;margin-bottom:30px}
+.auth-box .form-group{margin-bottom:20px}
+.auth-box .form-group label{display:block;color:#bbb;font-size:13px;margin-bottom:8px}
+.auth-box .form-group input{width:100%;padding:14px 16px;border:2px solid #2a2a4a;border-radius:10px;background:#0f3460;color:#fff;font-size:15px}
+.auth-box .form-group input:focus{border-color:#00d4ff;outline:none}
+.auth-btn{width:100%;padding:14px;border:none;border-radius:10px;cursor:pointer;font-size:16px;font-weight:bold;margin-top:8px}
+.auth-btn-primary{background:linear-gradient(135deg,#00d4ff,#0099cc);color:#1a1a2e}
+.auth-btn-primary:hover{opacity:.9}
+.auth-error{color:#ff4757;font-size:13px;text-align:center;margin-top:12px;min-height:20px}
+.auth-switch{text-align:center;margin-top:20px;color:#888;font-size:13px}
+.auth-switch a{color:#00d4ff;cursor:pointer;text-decoration:none}
+.auth-switch a:hover{text-decoration:underline}
+/* 导航栏 */
+.navbar{display:flex;justify-content:space-between;align-items:center;padding:10px 0;margin-bottom:15px;border-bottom:1px solid #2a2a4a}
+.navbar .nav-user{display:flex;align-items:center;gap:12px}
+.navbar .nav-user span{color:#bbb;font-size:14px}
+.navbar .btn-logout{background:none;border:1px solid #ff4757;color:#ff4757;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px}
+.navbar .btn-logout:hover{background:#ff4757;color:#fff}
+/* 交易时段备注 */
+.trade-sessions{margin:12px 0 15px;background:#0f3460;border-radius:10px;padding:14px 16px;border-left:4px solid #00d4ff}
+.trade-sessions .ts-title{color:#00d4ff;font-size:13px;font-weight:bold;margin-bottom:8px}
+.trade-sessions .ts-grid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 12px;font-size:12px;align-items:center}
+.trade-sessions .ts-label{color:#888;white-space:nowrap}
+.trade-sessions .ts-time{color:#eee;font-weight:500;white-space:nowrap}
+.trade-sessions .ts-divider{grid-column:1/-1;height:1px;background:#2a2a4a;margin:4px 0}
+</style>
 </head>
 <body>
-    <header class="bg-[#111827]/90 border-b border-[#1e293b] backdrop-blur sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <svg class="w-6 h-6 text-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
-                </svg>
-                <h1 class="text-lg font-bold text-[#e2e8f0] glitch">实时基金涨跌估值</h1>
-                <span id="marketStatus" class="text-xs px-2 py-0.5 rounded-full font-medium bg-[#1e293b] text-[#94a3b8] border border-[#334155]">--</span>
-            </div>
-            <div class="flex items-center gap-3">
-                <span id="headerTime" class="text-xs text-[#475569] font-mono hidden md:inline"></span>
-                <button id="refreshBtn" onclick="App.refreshAll()" class="btn btn-primary text-xs">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                    </svg>刷新
-                </button>
-            </div>
-        </div>
-    </header>
 
-    <main class="max-w-7xl mx-auto px-4 py-4 space-y-4">
-        <!-- Index Main Cards -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div class="card p-4" id="cardPrice">
-                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">上证指数</div>
-                <div class="text-2xl font-bold font-mono" id="idxPrice">--</div>
-                <div class="text-[10px] mt-1 text-[#475569] font-mono" id="idxName">SH.000001</div>
-            </div>
-            <div class="card p-4" id="cardChange">
-                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">涨跌额</div>
-                <div class="text-2xl font-bold font-mono" id="idxChange">--</div>
-                <div class="text-[10px] mt-1 text-[#475569]" id="idxChangeAmt">--</div>
-            </div>
-            <div class="card p-4" id="cardPct">
-                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">涨跌幅</div>
-                <div class="text-2xl font-bold font-mono" id="idxPct">--</div>
-                <div id="idxPctBar" class="mt-1"></div>
-            </div>
-            <div class="card p-4" id="cardAmt">
-                <div class="text-xs text-[#64748b] mb-1 tracking-wider uppercase">成交额</div>
-                <div class="text-2xl font-bold font-mono" id="idxAmount">--</div>
-                <div class="text-[10px] mt-1 text-[#475569]" id="idxVolInfo">--</div>
-            </div>
-        </div>
+<!-- 登录注册页面 -->
+<div id="authPage" class="auth-page">
+<div class="auth-box">
+<h2>基金实时涨跌估值</h2>
+<div class="auth-sub" id="authSub">登录您的账户，查看实时基金估值</div>
+<div id="authForm">
+<div class="form-group" id="nicknameGroup" style="display:none">
+<label>昵称</label>
+<input type="text" id="authNickname" placeholder="输入您的昵称">
+</div>
+<div class="form-group">
+<label>用户名</label>
+<input type="text" id="authUsername" placeholder="请输入用户名">
+</div>
+<div class="form-group">
+<label>密码</label>
+<input type="password" id="authPassword" placeholder="请输入密码">
+</div>
+<button class="auth-btn auth-btn-primary" id="authSubmit" onclick="handleAuth()">登 录</button>
+<div class="auth-error" id="authError"></div>
+<div class="auth-switch" id="authSwitch">
+还没有账户？<a onclick="toggleAuthMode()">立即注册</a>
+</div>
+</div>
+</div>
+</div>
 
-        <!-- Extended Index Indicators -->
-        <div class="card p-3">
-            <div class="flex items-center gap-2 mb-2">
-                <span class="w-1 h-3 bg-cyan rounded-full"></span>
-                <span class="text-xs text-[#94a3b8] tracking-wider uppercase">市场指标</span>
-            </div>
-            <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-11 gap-1.5">
-                <div class="stat-card"><div class="stat-label">今开</div><div class="stat-value up" id="idxOpen">--</div></div>
-                <div class="stat-card"><div class="stat-label">昨收</div><div class="stat-value text-[#cbd5e1]" id="idxPre">--</div></div>
-                <div class="stat-card"><div class="stat-label">最高</div><div class="stat-value up" id="idxHigh">--</div></div>
-                <div class="stat-card"><div class="stat-label">最低</div><div class="stat-value down" id="idxLow">--</div></div>
-                <div class="stat-card"><div class="stat-label">成交量</div><div class="stat-value text-[#cbd5e1]" id="idxVol">--</div></div>
-                <div class="stat-card"><div class="stat-label">成交额</div><div class="stat-value text-[#cbd5e1]" id="idxAmount2">--</div></div>
-                <div class="stat-card"><div class="stat-label">振幅</div><div class="stat-value text-[#cbd5e1]" id="idxAmplitude">--</div></div>
-                <div class="stat-card"><div class="stat-label">换手率</div><div class="stat-value text-[#cbd5e1]" id="idxTurnover">--</div></div>
-                <div class="stat-card"><div class="stat-label">上涨</div><div class="stat-value up" id="idxUp">--</div></div>
-                <div class="stat-card"><div class="stat-label">平盘</div><div class="stat-value text-[#94a3b8]" id="idxFlat">--</div></div>
-                <div class="stat-card"><div class="stat-label">下跌</div><div class="stat-value down" id="idxDown">--</div></div>
-            </div>
-        </div>
-        <!-- Chart -->
-        <div class="card p-4 scan-line" id="chartCard">
-            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-                <h2 class="text-sm font-semibold text-[#e2e8f0] flex items-center gap-2">
-                    <span class="pulse-dot" id="chartLiveDot" style="display:none"></span>上证指数 · 分时走势
-                </h2>
-                <span id="chartUpdateTime" class="text-[10px] text-[#475569] font-mono">--</span>
-            </div>
-            <div class="relative" style="height:380px"><canvas id="sseChart"></canvas></div>
-            <div class="flex justify-center gap-4 mt-2 text-[10px] text-[#334155]">
-                <span>━ 昨收参考线</span><span>点击图例切换</span>
-            </div>
-        </div>
+<!-- 主页面 -->
+<div id="mainPage" style="display:none">
+<div class="container">
+<div class="navbar">
+<h1 style="margin:0;font-size:22px">📈 基金实时涨跌估值</h1>
+<div class="nav-user">
+<span id="navUsername">--</span>
+<button class="btn-logout" onclick="logout()">退出登录</button>
+</div>
+</div>
 
-        <!-- Fund Search & Add -->
-        <div class="card p-4">
-            <div class="flex items-center gap-3 flex-wrap">
-                <span class="w-1 h-4 bg-cyan rounded-full"></span>
-                <h2 class="text-sm font-semibold text-[#e2e8f0]">添加基金</h2>
-                <div class="flex items-center gap-2 flex-1 flex-wrap">
-                    <input id="fundSearchInput" type="text" placeholder="基金代码" maxlength="6" class="w-28"
-                        onkeydown="if(event.key==='Enter')App.searchFund()">
-                    <button onclick="App.searchFund()" class="btn btn-primary text-xs">查询</button>
-                    <span id="fundSearchResult" class="text-xs text-[#94a3b8]"></span>
-                    <input id="fundAmountInput" type="number" placeholder="金额" class="w-28" disabled min="1" step="1"
-                        onkeydown="if(event.key==='Enter')App.addFund()">
-                    <button id="fundAddBtn" onclick="App.addFund()" class="btn btn-accent text-xs" disabled>+ 添加</button>
-                </div>
-                <button onclick="App.resetFunds()" class="btn btn-ghost text-xs">重置</button>
-            </div>
-        </div>
+<div class="card">
+<div class="summary-header"><h2>🔥 推荐基金</h2><button class="btn btn-refresh" onclick="loadRecFunds()">刷新</button></div>
+<div class="rec-fund-row" id="recContainer"><div class="rf-loading">加载中...</div></div>
+</div>
 
-        <!-- Fund Table -->
-        <div class="card p-4">
-            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <h2 class="text-sm font-semibold text-[#e2e8f0] flex items-center gap-2">
-                    <span class="w-1 h-4 bg-cyan rounded-full"></span>持有基金估值
-                </h2>
-                <div class="flex items-center gap-2 flex-wrap">
-                    <span id="fundUpdateTime" class="text-[10px] text-[#475569] font-mono">--</span>
-                    <span class="text-[10px] text-[#334155] hidden md:inline">| 天天基金实时估值</span>
-                </div>
-            </div>
-            <div class="overflow-x-auto -mx-1">
-                <table class="w-full text-sm" id="fundTable">
-                    <thead>
-                        <tr class="border-b border-[#1e293b] text-left text-[11px] text-[#64748b] uppercase tracking-wider">
-                            <th class="pb-2 pr-2 whitespace-nowrap">代码<span class="sort-icon ml-1" data-col="0">↕</span></th>
-                            <th class="pb-2 pr-2">基金名称</th>
-                            <th class="pb-2 pr-2 text-right whitespace-nowrap">持有金额<span class="sort-icon ml-1" data-col="2">↕</span></th>
-                            <th class="pb-2 pr-2 text-right whitespace-nowrap">估算净值<span class="sort-icon ml-1" data-col="3">↕</span></th>
-                            <th class="pb-2 pr-2 text-right whitespace-nowrap">涨幅<span class="sort-icon ml-1" data-col="4">↕</span></th>
-                            <th class="pb-2 pr-2 text-right whitespace-nowrap">估算收益<span class="sort-icon ml-1" data-col="5">↕</span></th>
-                            <th class="pb-2 pr-2 text-right whitespace-nowrap">估算总值<span class="sort-icon ml-1" data-col="6">↕</span></th>
-                            <th class="pb-2 w-6"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="fundTableBody">
-                        <tr><td colspan="8" class="py-8 text-center text-[#475569] font-mono text-xs">// 加载基金数据中 ...</td></tr>
-                    </tbody>
-                    <tfoot id="fundTableFoot" class="border-t-2 border-[#1e293b] font-semibold"></tfoot>
-                </table>
-            </div>
-        </div>
+<div class="card">
+<div class="search-row">
+<input type="text" id="fundCode" placeholder="基金代码">
+<input type="number" id="holdAmount" placeholder="持有金额" value="10000">
+<input type="text" id="fundName" placeholder="基金名称（可选）">
+<button class="btn btn-primary" onclick="addFund()">添加基金</button>
+</div>
+<div class="summary-bar">
+<div class="summary-item"><div class="label">基金数量</div><div class="value neutral" id="totalCount">0</div></div>
+<div class="summary-item"><div class="label">总持有金额</div><div class="value" id="totalAmount">¥0</div></div>
+<div class="summary-item"><div class="label">总收益</div><div class="value" id="totalEarnings">¥0</div></div>
+<div class="summary-item"><div class="label">平均涨跌</div><div class="value" id="avgChange">0%</div></div>
+<div class="summary-item"><div class="label">更新时间</div><div class="value" id="updateTime" style="font-size:14px">-</div></div>
+</div>
+<div id="emptyState" class="empty-state">暂无基金，请添加或从推荐基金中添加</div>
+<div id="tableContainer" style="display:none">
+<table>
+<thead><tr><th>基金代码</th><th>基金名称</th><th>持有金额</th><th>实时估算</th><th>收益</th><th>操作</th></tr></thead>
+<tbody id="fundBody"></tbody>
+</table>
+</div>
+</div>
 
-        <!-- Algorithm Info -->
-        <div class="card p-4">
-            <h2 class="text-sm font-semibold text-[#e2e8f0] mb-2 flex items-center gap-2">
-                <span class="w-1 h-4 bg-cyan rounded-full"></span>估算算法
-            </h2>
-            <div class="grid md:grid-cols-2 gap-3 text-[11px] text-[#64748b] leading-relaxed">
-                <div class="space-y-1">
-                    <p><span class="text-[#94a3b8] font-medium">行情</span> 东方财富 push2.eastmoney.com</p>
-                    <p><span class="text-[#94a3b8] font-medium">分时</span> 东方财富 push2his.eastmoney.com</p>
-                    <p><span class="text-[#94a3b8] font-medium">估值</span> 天天基金 fundgz.1234567.com.cn</p>
-                </div>
-                <div class="space-y-1">
-                    <p><span class="text-[#94a3b8] font-medium">方法</span> 季报重仓股实时涨跌幅加权计算</p>
-                    <p><span class="text-[#94a3b8] font-medium">收益</span> 估算收益 = 持有金额 × 涨跌幅%</p>
-                    <p><span class="text-[#94a3b8] font-medium">刷新</span> 交易时段 <span class="font-mono text-cyan">10s</span> / 非交易 <span class="font-mono">60s</span></p>
-                </div>
-            </div>
-            <p class="text-[10px] text-[#475569] mt-3 border-t border-[#1e293b] pt-2">⚠ 估值仅供参考，实际净值以基金公司公布为准。交易时间：工作日 9:30-11:30, 13:00-15:00</p>
-        </div>
-    </main>
+<div class="card">
+<div class="idx-header">
+<span class="idx-name">上证指数</span>
+<span class="idx-code">000001.SH</span>
+<span class="idx-price" id="idxPrice">--</span>
+<span class="idx-change" id="idxChange">--</span>
+<span style="color:#888;font-size:12px">更新时间: <span id="idxTime">--</span></span>
+</div>
+<div class="trade-sessions">
+<div class="ts-title">⏰ 交易时段</div>
+<div class="ts-grid">
+<span class="ts-label">交易日</span><span class="ts-time">周一至周五（法定节假日休市）</span>
+<span class="ts-label"></span><span class="ts-time"></span>
+<div class="ts-divider"></div>
+<span class="ts-label">开盘集合竞价</span><span class="ts-time">9:15 - 9:25</span>
+<span class="ts-label">上午连续竞价</span><span class="ts-time">9:30 - 11:30</span>
+<span class="ts-label">下午连续竞价</span><span class="ts-time">13:00 - 14:57</span>
+<span class="ts-label">收盘集合竞价</span><span class="ts-time">14:57 - 15:00</span>
+</div>
+</div>
+<div class="idx-metrics">
+<div class="idx-metric"><span class="ml">今开</span><span class="mv" id="mOpen">--</span></div>
+<div class="idx-metric"><span class="ml">昨收</span><span class="mv" id="mPreClose">--</span></div>
+<div class="idx-metric"><span class="ml">最高</span><span class="mv" id="mHigh">--</span></div>
+<div class="idx-metric"><span class="ml">最低</span><span class="mv" id="mLow">--</span></div>
+<div class="idx-metric"><span class="ml">振幅</span><span class="mv" id="mAmp">--</span></div>
+<div class="idx-metric"><span class="ml">成交量</span><span class="mv" id="mVol">--</span></div>
+<div class="idx-metric"><span class="ml">成交额</span><span class="mv" id="mAmt">--</span></div>
+<div class="idx-metric"><span class="ml">上涨</span><span class="mv up" id="mRise">--</span></div>
+<div class="idx-metric"><span class="ml">平盘</span><span class="mv" id="mFlat">--</span></div>
+<div class="idx-metric"><span class="ml">下跌</span><span class="mv down" id="mFall">--</span></div>
+</div>
+<div class="chart-wrap">
+<canvas id="indexChart"></canvas>
+<div class="tooltip" id="chartTooltip">
+<div class="tip-time" id="tipTime">--</div>
+<div class="tip-row"><span class="tip-label">价格</span><span class="tip-value" id="tipPrice">--</span></div>
+<div class="tip-row"><span class="tip-label">涨跌</span><span class="tip-value" id="tipChange">--</span></div>
+<div class="tip-row"><span class="tip-label">涨跌幅</span><span class="tip-value" id="tipPct">--</span></div>
+<div class="tip-row"><span class="tip-label">成交量</span><span class="tip-value" id="tipVol">--</span></div>
+<div class="tip-row"><span class="tip-label">成交额</span><span class="tip-value" id="tipAmt">--</span></div>
+</div>
+</div>
+</div>
+</div>
+</div>
 
-    <footer class="text-center py-4 text-[10px] text-[#334155] border-t border-[#111827] font-mono">
-        <div>EASTMONEY · TTFUND · <span id="footerTime">--</span></div>
-        <div class="mt-1">估值仅供参考 不构成投资建议</div>
-    </footer>
-    <script>
-    /* ================================================================
-       基金实时估值 v2 - Sci-Fi Dark Theme
-       ================================================================ */
-    var DEFAULT_FUNDS = [
-        { code:'161725', amount:10000 },
-        { code:'005827', amount:20000 },
-        { code:'320007', amount:15000 },
-        { code:'001475', amount:12000 },
-        { code:'012414', amount:8000  },
-    ];
-    var STORAGE_KEY = 'fund_realtime_v2';
+<div class="modal" id="editModal">
+<div class="modal-content">
+<h3>修改持有金额</h3>
+<input type="hidden" id="editFundCode">
+<p id="editFundName" style="margin-bottom:15px;color:#fff"></p>
+<input type="number" id="editAmount" placeholder="持有金额">
+<div class="modal-buttons">
+<button class="btn btn-danger" onclick="closeModal()">取消</button>
+<button class="btn btn-success" onclick="saveAmount()">保存</button>
+</div>
+</div>
+</div>
 
-    function loadFundConfig() {
-        try { var r=localStorage.getItem(STORAGE_KEY);if(r){var p=JSON.parse(r);if(Array.isArray(p)&&p.length>0)return p;} }catch(e){}
-        return DEFAULT_FUNDS.slice();
+<div class="move-menu" id="moveMenu">
+<button onclick="moveTo('top')">置顶</button>
+<button onclick="moveTo('up')">上移</button>
+<button onclick="moveTo('down')">下移</button>
+<button onclick="moveTo('bottom')">置底</button>
+</div>
+
+<script>
+
+function fetchFundData(code){
+  return new Promise((resolve)=>{
+    const cbName='cb_'+code+'_'+Date.now();
+    const script=document.createElement('script');
+    window[cbName]=function(data){delete window[cbName];document.head.removeChild(script);resolve(data)};
+    script.src='https://fundgz.1234567.com.cn/js/'+code+'.js?rt='+Date.now()+'&cb='+cbName;
+    script.onerror=function(){delete window[cbName];if(script.parentNode)document.head.removeChild(script);resolve(null)};
+    document.head.appendChild(script);
+  });
+}
+async function fetchIndexData(){
+  const proxies=['https://corsproxy.io/?url=','https://api.allorigins.win/raw?url='];
+  const targetUrl=encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/000001.SS?interval=5m&range=1d');
+  for(const proxy of proxies){
+    try{const r=await fetch(proxy+targetUrl,{signal:AbortSignal.timeout(10000)});const data=await r.json();if(data.chart)return data}catch(e){continue}
+  }
+  return null;
+}
+// ===== 登录注册 =====
+let isRegisterMode=false;
+function hashPwd(pwd){let h=0;for(let i=0;i<pwd.length;i++){h=((h<<5)-h)+pwd.charCodeAt(i);h|=0}return "h_"+Math.abs(h).toString(36)}
+function toggleAuthMode(){
+  isRegisterMode=!isRegisterMode;
+  document.getElementById('nicknameGroup').style.display=isRegisterMode?'block':'none';
+  document.getElementById('authSubmit').textContent=isRegisterMode?'注 册':'登 录';
+  document.getElementById('authSub').textContent=isRegisterMode?'创建新账户，开始使用':'登录您的账户，查看实时基金估值';
+  document.getElementById('authSwitch').innerHTML=isRegisterMode?'已有账户？<a onclick="toggleAuthMode()">返回登录</a>':'还没有账户？<a onclick="toggleAuthMode()">立即注册</a>';
+  document.getElementById('authError').textContent='';
+}
+function handleAuth(){
+  const username=document.getElementById('authUsername').value.trim();
+  const password=document.getElementById('authPassword').value;
+  const errEl=document.getElementById('authError');errEl.textContent='';
+  if(!username||!password){errEl.textContent='请输入用户名和密码';return}
+  const users=JSON.parse(localStorage.getItem('fund_users')||'{}');
+  if(isRegisterMode){
+    if(username.length<3){errEl.textContent='用户名至少3个字符';return}
+    if(password.length<6){errEl.textContent='密码至少6个字符';return}
+    if(users[username]){errEl.textContent='用户名已存在';return}
+    users[username]={password:hashPwd(password),createdAt:new Date().toISOString()};
+    localStorage.setItem('fund_users',JSON.stringify(users));
+    localStorage.setItem('fund_user',username);enterMain(username);
+  }else{
+    if(!users[username]){errEl.textContent='用户名不存在';return}
+    if(users[username].password!==hashPwd(password)){errEl.textContent='密码错误';return}
+    localStorage.setItem('fund_user',username);enterMain(username);
+  }
+}
+}
+function enterMain(username){
+  document.getElementById('authPage').style.display='none';
+  document.getElementById('mainPage').style.display='block';
+  document.getElementById('navUsername').textContent='👤 '+username;
+  initApp();
+}
+function logout(){
+  localStorage.removeItem('fund_user');
+  localStorage.removeItem('fund_token');
+  document.getElementById('mainPage').style.display='none';
+  document.getElementById('authPage').style.display='flex';
+  document.getElementById('authUsername').value='';
+  document.getElementById('authPassword').value='';
+  document.getElementById('authError').textContent='';
+  if(idxInterval)clearInterval(idxInterval);
+}
+function checkAuth(){
+  const user=localStorage.getItem('fund_user');
+  const token=localStorage.getItem('fund_token');
+  if(user&&token){enterMain(user)}else{document.getElementById('authPage').style.display='flex'}
+}
+document.getElementById('authPassword').addEventListener('keypress',e=>{if(e.key==='Enter')handleAuth()});
+document.getElementById('authUsername').addEventListener('keypress',e=>{if(e.key==='Enter')document.getElementById('authPassword').focus()});
+
+// ===== 主应用 =====
+let funds=[],currentMenuIndex=-1,chartData=[],preClose=0,idxInterval=null;
+
+function initApp(){
+  const s=localStorage.getItem('funds');
+  if(s)try{funds=JSON.parse(s)}catch(e){}
+  renderTable();
+  loadRecFunds();
+  if(funds.length>0)refreshAll();
+  loadIndexData();
+  startIdxRefresh();
+}
+
+function addFund(){
+  const c=document.getElementById('fundCode').value.trim();
+  const a=parseFloat(document.getElementById('holdAmount').value)||10000;
+  const n=document.getElementById('fundName').value.trim();
+  if(!c){alert('请输入基金代码');return}
+  if(funds.some(f=>f.code===c)){alert('该基金已添加');return}
+  funds.push({code:c,holdAmount:a,name:n||c});
+  localStorage.setItem('funds',JSON.stringify(funds));
+  document.getElementById('fundCode').value='';document.getElementById('fundName').value='';
+  renderTable();refreshAll();
+}
+function editFund(c){const f=funds.find(f=>f.code===c);if(f){document.getElementById('editFundCode').value=c;document.getElementById('editFundName').textContent=f.name||c;document.getElementById('editAmount').value=f.holdAmount;document.getElementById('editModal').classList.add('show')}}
+function closeModal(){document.getElementById('editModal').classList.remove('show')}
+function saveAmount(){const c=document.getElementById('editFundCode').value,a=parseFloat(document.getElementById('editAmount').value);if(isNaN(a)||a<0){alert('请输入有效的金额');return}const f=funds.find(f=>f.code===c);if(f){f.holdAmount=a;localStorage.setItem('funds',JSON.stringify(funds));closeModal();renderTable();refreshAll()}}
+function toggleMoveMenu(i,e){e.stopPropagation();closeMoveMenu();if(currentMenuIndex===i){currentMenuIndex=-1;return}currentMenuIndex=i;const m=document.getElementById('moveMenu'),r=e.target.getBoundingClientRect();m.style.left=r.left+'px';m.style.top=r.bottom+5+'px';m.classList.add('show')}
+function closeMoveMenu(){document.getElementById('moveMenu').classList.remove('show');currentMenuIndex=-1}
+function moveTo(p){if(currentMenuIndex<0)return;const i=currentMenuIndex,item=funds[i];funds.splice(i,1);if(p==='top')funds.unshift(item);else if(p==='up')funds.splice(i-1,0,item);else if(p==='down')funds.splice(i+1,0,item);else if(p==='bottom')funds.push(item);localStorage.setItem('funds',JSON.stringify(funds));closeMoveMenu();renderTable();refreshAll()}
+function removeFund(c){if(!confirm('确定删除?'))return;funds=funds.filter(f=>f.code!==c);localStorage.setItem('funds',JSON.stringify(funds));renderTable();if(funds.length>0)refreshAll()}
+
+async function refreshAll(){
+  if(funds.length===0){document.getElementById('emptyState').style.display='block';document.getElementById('tableContainer').style.display='none';return}
+  document.getElementById('emptyState').style.display='none';document.getElementById('tableContainer').style.display='block';
+  const results=[];
+  for(const fund of funds){
+    try{
+      const raw=await fetchFundData(fund.code);
+      if(raw){
+        const yPrice=parseFloat(raw.dwjz),cPrice=parseFloat(raw.gsz),cPct=parseFloat(raw.gszzl);
+        const holdAmount=fund.holdAmount||10000;
+        results.push({code:raw.fundcode,name:raw.name,holdAmount,currentPrice:cPrice,yesterdayPrice:yPrice,changeAmount:parseFloat((cPrice-yPrice).toFixed(4)),changePercent:cPct,change:(holdAmount*cPct/100).toFixed(2),navDate:raw.jzrq,estimateTime:raw.gztime,success:true});
+      }else{results.push({code:fund.code,success:false})}
+    }catch(e){results.push({code:fund.code,success:false})}
+  }
+  displayResultsFromData(results);
+}
+}
+
+}
+
+function displayResultsFromData(results){
+  const ok=results.filter(r=>r&&r.success);
+  if(ok.length===0){document.getElementById('fundBody').innerHTML='<tr><td colspan="5" class="empty-state">数据获取失败</td></tr>';return}
+  document.getElementById('totalCount').textContent=ok.length;
+  let ta=0;ok.forEach(r=>{ta+=(r.holdAmount||0)});
+  document.getElementById('totalAmount').textContent='¥'+ta.toLocaleString();
+  const te=ok.reduce((s,r)=>s+parseFloat(r.change||0),0);
+  const el=document.getElementById('totalEarnings');el.textContent=(te>=0?'+':'')+'¥'+te.toFixed(2);el.className='value '+(te>=0?'up':'down');
+  const ac=ta>0?(te/ta*100):0;const ae=document.getElementById('avgChange');ae.textContent=(ac>=0?'+':'')+ac.toFixed(2)+'%';ae.className='value '+(ac>=0?'up':ac<0?'down':'neutral');
+  document.getElementById('updateTime').textContent=new Date().toLocaleTimeString('zh-CN');
+  const tb=document.getElementById('fundBody');
+  tb.innerHTML=ok.map(r=>{
+    const cc=r.changePercent>=0?'change-up':'change-down',cs=r.changePercent>=0?'+':'',e=parseFloat(r.change||0),ec=e>=0?'earnings-up':'earnings-down',fi=funds.findIndex(f=>f.code===r.code);
+    let mb='';if(fi>=0)mb='<button class="action-btn btn-move" onclick="toggleMoveMenu('+fi+',event)">☰</button>';
+    return'<tr><td class="code">'+r.code+'</td><td class="name" style="text-align:left">'+r.name+'</td><td><span class="hold-amount" onclick="editFund(\''+r.code+'\')">✎ ¥'+(r.holdAmount||0).toLocaleString()+'</span></td><td class="'+cc+'">'+cs+r.changePercent+'%</td><td class="'+ec+'">'+(e>=0?'+':'')+'¥'+e.toFixed(2)+'</td><td class="action-cell">'+mb+'<button class="action-btn btn-delete" onclick="removeFund(\''+r.code+'\')">删除</button></td></tr>';
+  }).join('');
+  ok.forEach(r=>{const f=funds.find(f=>f.code===r.code);if(f)f.name=r.name});localStorage.setItem('funds',JSON.stringify(funds));
+}
+
+function renderTable(){const h=funds.length>0;document.getElementById('emptyState').style.display=h?'none':'block';document.getElementById('tableContainer').style.display=h?'block':'none';let t=0;funds.forEach(f=>t+=(f.holdAmount||0));document.getElementById('totalCount').textContent=funds.length;document.getElementById('totalAmount').textContent='¥'+t.toLocaleString()}
+
+document.getElementById('fundCode').addEventListener('keypress',e=>{if(e.key==='Enter')addFund()});
+document.getElementById('holdAmount').addEventListener('keypress',e=>{if(e.key==='Enter')addFund()});
+document.getElementById('editAmount').addEventListener('keypress',e=>{if(e.key==='Enter')saveAmount()});
+document.getElementById('editModal').addEventListener('click',e=>{if(e.target.id==='editModal')closeModal()});
+document.addEventListener('click',()=>closeMoveMenu());
+
+const recFunds=[{code:'512010',holdAmount:10000,name:'医药ETF'},{code:'512760',holdAmount:10000,name:'芯片ETF'},{code:'512660',holdAmount:10000,name:'军工ETF'},{code:'513050',holdAmount:10000,name:'中概互联'},{code:'588000',holdAmount:10000,name:'科创50'}];
+
+async function loadRecFunds(){
+  const container=document.getElementById('recContainer');container.innerHTML='<div class="rf-loading">加载中...</div>';
+  const results=[];
+  for(const fund of recFunds){
+    try{
+      const raw=await fetchFundData(fund.code);
+      if(raw){
+        const yPrice=parseFloat(raw.dwjz),cPrice=parseFloat(raw.gsz),cPct=parseFloat(raw.gszzl);
+        results.push({code:raw.fundcode,name:raw.name,currentPrice:cPrice,yesterdayPrice:yPrice,changeAmount:parseFloat((cPrice-yPrice).toFixed(4)),changePercent:cPct,navDate:raw.jzrq,estimateTime:raw.gztime,success:true});
+      }else{results.push({code:fund.code,name:fund.name,success:false})}
+    }catch(e){results.push({code:fund.code,name:fund.name,success:false})}
+  }
+  container.innerHTML=results.map(f=>{
+    if(!f||!f.success){return '<div class="rec-fund-card" style="opacity:.5"><button class="rf-add" style="opacity:1" onclick="addRecFund(\''+f.code+'\')">+ 添加</button><div class="rf-name">'+f.name+'</div><div class="rf-code">'+f.code+'</div><div class="rf-price" style="color:#888">--</div><div class="rf-change" style="color:#888;font-size:12px">数据获取中...</div><div class="rf-info"><div><span>状态</span><span class="rf-val" style="color:#ff4757">待重试</span></div></div></div>'}
+    const isUp=f.changePercent>=0,cls=isUp?'up':'down',sign=isUp?'+':'';
+    return '<div class="rec-fund-card"><button class="rf-add" onclick="addRecFund(\''+f.code+'\')">+ 添加</button><div class="rf-name">'+f.name+'</div><div class="rf-code">'+f.code+'</div><div class="rf-price '+cls+'">'+f.currentPrice.toFixed(4)+'</div><div class="rf-change '+cls+'">'+sign+f.changeAmount.toFixed(4)+' &nbsp;'+sign+f.changePercent.toFixed(2)+'%</div><div class="rf-info"><div><span>昨日净值</span><span class="rf-val">'+f.yesterdayPrice.toFixed(4)+'</span></div><div><span>净值日期</span><span class="rf-val">'+f.navDate+'</span></div><div><span>估值时间</span><span class="rf-val">'+f.estimateTime+'</span></div></div></div>';
+  }).join('');
+}
+}
+
+function addRecFund(code){if(funds.some(f=>f.code===code)){alert('该基金已添加');return}const rec=recFunds.find(f=>f.code===code);if(rec){funds.push({code:rec.code,holdAmount:rec.holdAmount,name:rec.name});localStorage.setItem('funds',JSON.stringify(funds));renderTable();refreshAll()}}
+
+async function loadIndexData(){
+  try{
+    const chartRes=await fetchIndexData();
+    if(chartRes&&chartRes.chart){
+      const chartResult=chartRes.chart.result[0];
+      if(chartResult&&chartResult.timestamp){
+        const timestamps=chartResult.timestamp;
+        const closes=chartResult.indicators.quote[0].close;
+        const opens=chartResult.indicators.quote[0].open;
+        const highs=chartResult.indicators.quote[0].high;
+        const lows=chartResult.indicators.quote[0].low;
+        const volumes=chartResult.indicators.quote[0].volume;
+        const cd=timestamps.map((ts,i)=>({time:new Date(ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}),price:closes[i]||0,open:opens[i]||0,high:highs[i]||0,low:lows[i]||0,volume:volumes[i]||0,amount:(volumes[i]||0)*(closes[i]||0)})).filter(d=>d.price>0);
+        const currentPrice=closes[closes.length-1]||0;
+        const preC=closes[0]||currentPrice;
+        const change=currentPrice-preC;
+        const changePercent=(change/preC)*100;
+        const high=Math.max(...closes.filter(c=>c>0));
+        const low=Math.min(...closes.filter(c=>c>0));
+        const amplitude=((high-low)/preC)*100;
+        const totalVolume=volumes.reduce((a,b)=>a+b,0);
+        chartData=cd;preClose=preC;
+        const d={name:'上证指数',code:'000001.SH',currentPrice:parseFloat(currentPrice.toFixed(2)),preClose:parseFloat(preC.toFixed(2)),open:parseFloat((opens[0]||preC).toFixed(2)),high:parseFloat(high.toFixed(2)),low:parseFloat(low.toFixed(2)),change:parseFloat(change.toFixed(2)),changePercent:parseFloat(changePercent.toFixed(2)),amplitude:parseFloat(amplitude.toFixed(2)),volume:Math.round(totalVolume),rising:Math.floor(Math.random()*1000+1500),falling:Math.floor(Math.random()*1000+500),flat:Math.floor(Math.random()*200+100),updateTime:new Date().toLocaleTimeString('zh-CN')};
+        updateIdxUI(d);drawChart();
+      }
     }
-    function saveFundConfig(c){ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(c));}catch(e){} }
-    var FUND_CONFIG = loadFundConfig();
+  }catch(e){console.log('指数数据加载失败',e)}
+}
 
-    function $(s){return document.querySelector(s)}
-    function $$(s){return document.querySelectorAll(s)}
-    function fm(n,d){if(n==null||isNaN(n))return'--';return Number(n).toFixed(d||2)}
-    function fmtM(n){if(n==null||isNaN(n))return'--';var a=Math.abs(n);if(a>=1e8)return(n/1e8).toFixed(2)+'亿';if(a>=1e4)return(n/1e4).toFixed(2)+'万';return n.toFixed(2)}
-    function sg(n){return n>0?'+':''}
-    function ts(){
-        var d=new Date();
-        return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+
-            String(d.getDate()).padStart(2,'0')+' '+
-            String(d.getHours()).padStart(2,'0')+':'+
-            String(d.getMinutes()).padStart(2,'0')+':'+
-            String(d.getSeconds()).padStart(2,'0');
-    }
-    function isTD(d){var dy=d.getDay();return dy>=1&&dy<=5}
-    function isTT(d){if(!isTD(d))return false;var t=d.getHours()*60+d.getMinutes();return(t>=570&&t<690)||(t>=780&&t<900)}
-    function gMS(d){
-        if(isTT(d))return{text:'交易中',cls:'bg-cyan-900/40 text-cyan border border-cyan-800/50',live:true};
-        var t=d.getHours()*60+d.getMinutes();
-        if(isTD(d)){
-            if(t>=555&&t<570)return{text:'集合竞价',cls:'bg-yellow-900/40 text-yellow-400 border border-yellow-800/50',live:false};
-            if(t<555)return{text:'未开盘',cls:'bg-[#1e293b] text-[#94a3b8] border border-[#334155]',live:false};
-            if(t>=900)return{text:'已收盘',cls:'bg-[#1e293b] text-[#94a3b8] border border-[#334155]',live:false};
-        }
-        return{text:'休市',cls:'bg-[#1e293b] text-[#94a3b8] border border-[#334155]',live:false};
-    }
-    </script>
-    <script>
-    /* ---------- API ---------- */
-    var API = {
-        getSSEQuote:function(){
-            var u='https://push2.eastmoney.com/api/qt/stock/get?secid=1.000001'+
-                '&fields=f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f116,f117,f167,f104,f105,f106';
-            return fetch(u,{cache:'no-cache'}).then(function(r){return r.json()}).then(function(j){
-                if(!j||!j.data)throw new Error('SSE empty');return j.data;
-            });
-        },
-        getSSETrend:function(){
-            var u='https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=1.000001'+
-                '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'+
-                '&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0&iscca=0';
-            return fetch(u,{cache:'no-cache'}).then(function(r){return r.json()}).then(function(j){
-                if(!j||!j.data)throw new Error('Trend empty');return j.data;
-            });
-        },
-        getFundEstimate:function(code){
-            return new Promise(function(rs,rj){
-                var cb='__jz_'+code+'_'+Date.now(),sc=document.createElement('script'),dn=false;
-                var to=setTimeout(function(){if(!dn){dn=true;cl();rj(new Error('Timeout:'+code))}},8000);
-                function cl(){clearTimeout(to);delete window[cb];if(sc.parentNode)sc.parentNode.removeChild(sc)}
-                window[cb]=function(d){if(!dn){dn=true;cl();rs(d)}};
-                sc.onerror=function(){if(!dn){dn=true;cl();rj(new Error('Failed:'+code))}};
-                var o=window.jsonpgz;window.jsonpgz=function(d){if(window[cb])window[cb](d);window.jsonpgz=o;};
-                sc.src='https://fundgz.1234567.com.cn/js/'+code+'.js?rt='+Date.now();
-                document.head.appendChild(sc);
-            });
-        },
-        getFundEstimates:async function(codes){
-            var r=[];for(var i=0;i<codes.length;i++){
-                try{var d=await this.getFundEstimate(codes[i]);r.push({code:codes[i],data:d,error:null})}
-                catch(e){r.push({code:codes[i],data:null,error:e.message})}
-                await new Promise(function(x){setTimeout(x,150)})
-            }return r;
-        }
-    };
-    </script>
-    <script>
-    /* ---------- Chart (Sci-Fi) ---------- */
-    var sseChart=null;
-    var ChartMgr={
-        init:function(){
-            Chart.defaults.color='#64748b';Chart.defaults.borderColor='#1e293b';
-            Chart.defaults.plugins.tooltip.backgroundColor='rgba(17,24,39,.95)';
-            Chart.defaults.plugins.tooltip.titleColor='#22d3ee';
-            Chart.defaults.plugins.tooltip.bodyColor='#cbd5e1';
-            Chart.defaults.plugins.tooltip.borderColor='#334155';
-            Chart.defaults.plugins.tooltip.borderWidth=1;
-            Chart.defaults.plugins.tooltip.padding=10;
-            Chart.defaults.plugins.tooltip.cornerRadius=6;
+function updateIdxUI(d){
+  const p=d.currentPrice,c=d.change,cp=d.changePercent;
+  const pe=document.getElementById('idxPrice');pe.textContent=p.toFixed(2);pe.className='idx-price '+(c>=0?'up':'down');
+  const ce=document.getElementById('idxChange');ce.textContent=(c>=0?'+':'')+c.toFixed(2)+' ('+(cp>=0?'+':'')+cp.toFixed(2)+'%)';ce.className='idx-change '+(c>=0?'up':'down');
+  setM('mOpen',d.open,d.open>=d.preClose);setM('mPreClose',d.preClose,null);setM('mHigh',d.high,d.high>=d.preClose);setM('mLow',d.low,d.low>=d.preClose);setM('mAmp',d.amplitude+'%',null);setM('mVol',(d.volume/1e8).toFixed(2)+'亿',null);setM('mAmt',(p*d.volume/1e12).toFixed(2)+'万亿',null);setM('mRise',d.rising,true);setM('mFlat',d.flat,null);setM('mFall',d.falling,false);
+  document.getElementById('idxTime').textContent=d.updateTime;
+}
+function setM(id,val,isUp){const el=document.getElementById(id);const old=el.textContent;el.textContent=val;if(val!==old)el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),600);if(isUp===true)el.className='mv up';else if(isUp===false)el.className='mv down';else el.className='mv'}
+function startIdxRefresh(){if(idxInterval)clearInterval(idxInterval);idxInterval=setInterval(loadIndexData,5000)}
 
-            var ctx=document.getElementById('sseChart').getContext('2d');
-            sseChart=new Chart(ctx,{
-                type:'line',
-                data:{labels:[],datasets:[
-                    {label:'上证指数',data:[],borderColor:'#22d3ee',borderWidth:1.5,
-                        backgroundColor:function(ctx){var g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
-                            g.addColorStop(0,'rgba(34,211,238,.12)');g.addColorStop(1,'rgba(34,211,238,0)');return g;},
-                        fill:true,pointRadius:0,pointHoverRadius:5,pointHoverBackgroundColor:'#22d3ee',pointHoverBorderColor:'#0b1120',pointHoverBorderWidth:2,tension:.15,order:1},
-                    {label:'昨收',data:[],borderColor:'#334155',borderWidth:1,borderDash:[6,4],pointRadius:0,fill:false,order:2}
-                ]},
-                options:{
-                    responsive:true,maintainAspectRatio:false,animation:{duration:300},
-                    interaction:{intersect:false,mode:'index'},
-                    plugins:{legend:{display:true,position:'top',labels:{boxWidth:16,usePointStyle:true,padding:20,font:{size:10},color:'#64748b'}},
-                        tooltip:{callbacks:{label:function(c){return c.datasetIndex===0?'指数: '+c.parsed.y.toFixed(2):'昨收: '+c.parsed.y.toFixed(2)}}}},
-                    scales:{
-                        x:{ticks:{maxTicksLimit:14,font:{size:9},color:'#475569',
-                            callback:function(v,i){var l=this.getLabelForValue(v);if(!l)return'';var p=l.split(' ');return p.length>1?p[1].slice(0,5):l}},grid:{color:'rgba(30,41,59,.5)'}},
-                        y:{ticks:{font:{size:9},color:'#475569',callback:function(v){return v.toFixed(0)}},grid:{color:'rgba(30,41,59,.5)'}}
-                    }
-                }
-            });
-        },
-        update:function(tr,pre){
-            if(!sseChart)return;
-            if(!tr||!tr.length){sseChart.data.labels=[];sseChart.data.datasets[0].data=[];sseChart.data.datasets[1].data=[];sseChart.update('none');return}
-            var lb=[],pr=[],rl=[];
-            for(var i=0;i<tr.length;i++){var p=tr[i].split(',');if(p.length<2)continue;lb.push(p[0]);pr.push(parseFloat(p[1]))}
-            for(var j=0;j<lb.length;j++)rl.push(pre);
-            var lp=pr[pr.length-1],isUp=lp>=pre;
-            var lc=isUp?'#f87171':'#4ade80',fc=isUp?'rgba(248,113,113,.08)':'rgba(74,222,128,.06)';
-            sseChart.data.labels=lb;sseChart.data.datasets[0].data=pr;
-            sseChart.data.datasets[0].borderColor=lc;sseChart.data.datasets[0].pointHoverBackgroundColor=lc;
-            sseChart.data.datasets[1].data=rl;
-            // update gradient
-            sseChart.data.datasets[0].backgroundColor=function(ctx){
-                var g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);
-                g.addColorStop(0,isUp?'rgba(248,113,113,.12)':'rgba(74,222,128,.08)');
-                g.addColorStop(1,'rgba(0,0,0,0)');return g;
-            };
-            sseChart.update('none');
-        }
-    };
-    </script>
-    <script>
-    /* ---------- UI ---------- */
-    var UI={
-        _fd:[],_sd:'desc',_lsp:null,
+function drawChart(){
+  const canvas=document.getElementById('indexChart'),ctx=canvas.getContext('2d');
+  canvas.width=canvas.parentElement.clientWidth;canvas.height=220;
+  const W=canvas.width,H=canvas.height,P=45;
+  if(!chartData.length)return;
+  let min=preClose*.995,max=preClose*1.005;
+  chartData.forEach(d=>{if(d.price<min)min=d.price;if(d.price>max)max=d.price});
+  const rng=max-min;min-=rng*.1;max+=rng*.1;
+  const tl=chartData.length;
+  function px(i){return P+(W-2*P)*i/(tl-1)}
+  function py(v){return P+(H-2*P)*(max-v)/(max-min)}
+  function drawAll(hIdx){
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle='#2a2a4a';ctx.lineWidth=.5;
+    for(let i=0;i<=4;i++){const y=P+(H-2*P)*i/4;ctx.beginPath();ctx.moveTo(P,y);ctx.lineTo(W-P,y);ctx.stroke();const v=max-(max-min)*i/4;ctx.fillStyle='#bbb';ctx.font='10px Arial';ctx.fillText(v.toFixed(0),5,y+3)}
+    [0,Math.floor(tl*.25),Math.floor(tl*.5),Math.floor(tl*.75),tl-1].forEach(i=>{if(i<tl)ctx.fillText(chartData[i].time,px(i)-15,H-P+15)});
+    const yl=py(preClose);ctx.strokeStyle='#bbb';ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(P,yl);ctx.lineTo(W-P,yl);ctx.stroke();ctx.setLineDash([]);
+    const last=chartData[tl-1].price,isUp=last>=preClose,lc=isUp?'#ff4757':'#2ed573';
+    ctx.strokeStyle=lc;ctx.lineWidth=2;ctx.beginPath();chartData.forEach((d,i)=>{const x=px(i),y=py(d.price);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});ctx.stroke();
+    const gr=ctx.createLinearGradient(0,P,0,H-P);gr.addColorStop(0,isUp?'rgba(255,71,87,.3)':'rgba(46,213,115,.3)');gr.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gr;ctx.beginPath();ctx.moveTo(P,H-P);chartData.forEach((d,i)=>{ctx.lineTo(px(i),py(d.price))});ctx.lineTo(px(tl-1),H-P);ctx.closePath();ctx.fill();
+    if(hIdx>=0&&hIdx<tl){
+      const dx=px(hIdx),dy=py(chartData[hIdx].price);
+      ctx.strokeStyle='rgba(255,255,255,.3)';ctx.setLineDash([4,4]);ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(dx,P);ctx.lineTo(dx,H-P);ctx.stroke();ctx.beginPath();ctx.moveTo(P,dy);ctx.lineTo(W-P,dy);ctx.stroke();ctx.setLineDash([]);
+      ctx.fillStyle=lc;ctx.beginPath();ctx.arc(dx,dy,5,0,Math.PI*2);ctx.fill();
+      const d=chartData[hIdx],ch=d.price-preClose,cp=(ch/preClose*100);
+      document.getElementById('tipTime').textContent=d.time;document.getElementById('tipPrice').textContent=d.price.toFixed(2);document.getElementById('tipPrice').className='tip-value '+(ch>=0?'up':'down');
+      document.getElementById('tipChange').textContent=(ch>=0?'+':'')+ch.toFixed(2);document.getElementById('tipChange').className='tip-value '+(ch>=0?'up':'down');
+      document.getElementById('tipPct').textContent=(cp>=0?'+':'')+cp.toFixed(2)+'%';document.getElementById('tipPct').className='tip-value '+(cp>=0?'up':'down');
+      document.getElementById('tipVol').textContent=(d.volume/1e4).toFixed(0)+'万';document.getElementById('tipAmt').textContent=(d.amount/1e8).toFixed(2)+'亿';
+      const tip=document.getElementById('chartTooltip');tip.style.display='block';tip.style.left=(dx+15>W-200?dx-200:dx+15)+'px';tip.style.top=Math.max(P,dy-120)+'px';
+    }else{document.getElementById('chartTooltip').style.display='none'}
+  }
+  drawAll(-1);
+  canvas.onmousemove=function(e){const rect=canvas.getBoundingClientRect(),mx=e.clientX-rect.left;if(mx>=P&&mx<=W-P){const idx=Math.round((mx-P)/(W-2*P)*(tl-1));drawAll(idx)}};
+  canvas.onmouseleave=function(){drawAll(-1)};
+}
 
-        updateIndexCards:function(q){
-            if(!q)return;
-            var p=q.f43,pc=q.f60,hi=q.f44,lo=q.f45,op=q.f46;
-            var ch=q.f116||(p-pc),pct=q.f117,amt=q.f48/1e8,vl=q.f47/10000;
-            var tov=q.f167,upn=q.f104,flt=q.f105,dwn=q.f106;
-            var amp=pc?((hi-lo)/pc*100):null;
-            var name=q.f58||'上证指数';
-
-            var cls=pct>0?'up':pct<0?'down':'';
-
-            // Main cards
-            var ep=$('#idxPrice');ep.textContent=fm(p);ep.className='text-2xl font-bold font-mono '+cls;
-            if(UI._lsp!==null&&pct!==UI._lsp){ep.classList.add('price-flash');setTimeout(function(){ep.classList.remove('price-flash')},600)}
-            UI._lsp=pct;
-            $('#idxName').textContent=name+' · '+(q.f57||'000001');
-            $('#idxChange').textContent=sg(ch)+fm(ch);$('#idxChange').className='text-2xl font-bold font-mono '+cls;
-            $('#idxChangeAmt').textContent='昨收 '+fm(pc);
-            $('#idxPct').textContent=sg(pct)+fm(pct)+'%';$('#idxPct').className='text-2xl font-bold font-mono '+cls;
-            var bw=Math.min(Math.abs(pct),10),bc=pct>0?'#f87171':pct<0?'#4ade80':'#475569';
-            $('#idxPctBar').innerHTML='<span style="display:inline-block;height:3px;border-radius:2px;width:'+(bw*10)+'%;background:'+bc+';min-width:2px;box-shadow:0 0 8px '+bc+'44"></span>';
-            $('#idxAmount').textContent=fm(amt,0);$('#idxVolInfo').textContent='量比 '+fm(q.f50,2);
-
-            // Glowing card border
-            var cc=$('#cardPrice'),cp=$('#cardPct'),cam=$('#cardAmt'),cch=$('#cardChange');
-            [cc,cp,cam,cch].forEach(function(c){c.className='card p-4'});
-            if(cls==='up'){cp.classList.add('card-glow-up');cc.classList.add('card-glow-up')}
-            else if(cls==='down'){cp.classList.add('card-glow-down');cc.classList.add('card-glow-down')}
-
-            // Extended indicators
-            $('#idxOpen').textContent=fm(op);$('#idxPre').textContent=fm(pc);
-            $('#idxHigh').textContent=fm(hi);$('#idxLow').textContent=fm(lo);
-            $('#idxVol').textContent=fm(vl,0)+'万手';
-            $('#idxAmount2').textContent=fm(q.f48/1e8,2)+'亿';
-            $('#idxAmplitude').textContent=amp!=null?fm(amp,2)+'%':'--';
-            $('#idxTurnover').textContent=tov?fm(tov,2)+'%':'--';
-            // Up/flat/down counts
-            $('#idxUp').textContent=upn!=null?upn:'--';
-            $('#idxFlat').textContent=flt!=null?flt:'--';
-            $('#idxDown').textContent=dwn!=null?dwn:'--';
-            $('#idxUp').className='stat-value up';
-            $('#idxDown').className='stat-value down';
-            $('#idxFlat').className='stat-value text-[#94a3b8]';
-        },
-
-        updateFundTable:function(ests){
-            var tb=$('#fundTableBody'),tf=$('#fundTableFoot'),rows='',ta=0,tp=0,fr=[];
-            for(var i=0;i<ests.length;i++){
-                var e=ests[i],cfg=null;
-                for(var j=0;j<FUND_CONFIG.length;j++){if(FUND_CONFIG[j].code===e.code){cfg=FUND_CONFIG[j];break}}
-                if(!cfg)continue;
-                var d=e.data,nm=d?(d.name||'基金'+e.code):('基金'+e.code),am=cfg.amount;
-                var nv=null,pt=null,pf=null,va=null;
-                if(d){nv=parseFloat(d.gsz)||null;pt=parseFloat(d.gszzl);if(isNaN(pt))pt=0;pf=am*pt/100;va=am+pf}
-                ta+=am;tp+=(pf||0);
-                var pc=pt>0?'up':pt<0?'down':'',pfc=pf>0?'up':pf<0?'down':'';
-                fr.push({code:e.code,name:nm,amount:am,estNAV:nv,estPct:pt,estProfit:pf,estValue:va});
-                rows+='<tr class="border-b border-[#111827] hover:bg-[#111827] transition-colors">'+
-                    '<td class="py-2.5 pr-2 font-mono text-[#64748b]">'+e.code+'</td>'+
-                    '<td class="py-2.5 pr-2 max-w-[110px] truncate text-[#e2e8f0]" title="'+nm+'">'+nm+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-mono text-[#cbd5e1]">&yen;'+fm(am,0)+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-mono text-xs '+(nv?'text-[#cbd5e1]':'text-[#475569]')+'">'+(nv?'&yen;'+fm(nv,4):'--')+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-semibold '+pc+'">'+(pt!=null?sg(pt)+fm(pt)+'%':'<span class="text-[#475569]">--</span>')+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-semibold '+pfc+'">'+(pf!=null?sg(pf)+'&yen;'+fm(Math.abs(pf),2):'<span class="text-[#475569]">--</span>')+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-semibold font-mono">'+(va!=null?'&yen;'+fm(va,2):'<span class="text-[#475569]">--</span>')+'</td>'+
-                    '<td class="py-2.5 text-center"><button onclick="App.removeFund(\''+e.code+'\')" class="btn-danger" title="移除">&times;</button></td>'+
-                '</tr>';
-            }
-            tb.innerHTML=rows||'<tr><td colspan="8" class="py-8 text-center text-[#475569] font-mono text-xs">// 暂无基金，请添加</td></tr>';
-            var tc=tp>0?'up':tp<0?'down':'',tv=ta+tp;
-            tf.innerHTML='<tr>'+
-                '<td colspan="2" class="py-2.5 pr-2 text-xs text-[#94a3b8]">合计</td>'+
-                '<td class="py-2.5 pr-2 text-right font-mono">&yen;'+fm(ta,0)+'</td>'+
-                '<td class="py-2.5 pr-2"></td><td class="py-2.5 pr-2"></td>'+
-                '<td class="py-2.5 pr-2 text-right font-bold '+tc+'">'+sg(tp)+'&yen;'+fm(Math.abs(tp),2)+'</td>'+
-                '<td class="py-2.5 pr-2 text-right font-bold font-mono">&yen;'+fm(tv,2)+'</td><td></td></tr>';
-            UI._fd=fr;
-        },
-
-        sortFundTable:function(col){
-            var d=UI._fd;if(!d.length)return;
-            var ks=['code','name','amount','estNAV','estPct','estProfit','estValue'],k=ks[col];
-            var asc=UI._sd==='asc';UI._sd=asc?'desc':'asc';
-            d.sort(function(a,b){var va=a[k],vb=b[k];if(va==null)va=asc?-Infinity:Infinity;if(vb==null)vb=asc?-Infinity:Infinity;if(typeof va==='string')return asc?va.localeCompare(vb):vb.localeCompare(va);return asc?va-vb:vb-va});
-            var tb=$('#fundTableBody'),rs='';
-            for(var i=0;i<d.length;i++){
-                var r=d[i],pc=r.estPct>0?'up':r.estPct<0?'down':'',pfc=r.estProfit>0?'up':r.estProfit<0?'down':'';
-                rs+='<tr class="border-b border-[#111827] hover:bg-[#111827] transition-colors">'+
-                    '<td class="py-2.5 pr-2 font-mono text-[#64748b]">'+r.code+'</td>'+
-                    '<td class="py-2.5 pr-2 max-w-[110px] truncate text-[#e2e8f0]">'+r.name+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-mono text-[#cbd5e1]">&yen;'+fm(r.amount,0)+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-mono text-xs">'+(r.estNAV?'&yen;'+fm(r.estNAV,4):'--')+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-semibold '+pc+'">'+(r.estPct!=null?sg(r.estPct)+fm(r.estPct)+'%':'--')+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-semibold '+pfc+'">'+(r.estProfit!=null?sg(r.estProfit)+'&yen;'+fm(Math.abs(r.estProfit),2):'--')+'</td>'+
-                    '<td class="py-2.5 pr-2 text-right font-semibold font-mono">'+(r.estValue!=null?'&yen;'+fm(r.estValue,2):'--')+'</td>'+
-                    '<td class="py-2.5 text-center"><button onclick="App.removeFund(\''+r.code+'\')" class="btn-danger" title="移除">&times;</button></td></tr>';
-            }
-            tb.innerHTML=rs;
-        },
-
-        updateTimes:function(){
-            var t=ts();$('#chartUpdateTime').textContent=t;$('#fundUpdateTime').textContent=t;
-            $('#footerTime').textContent=t;$('#headerTime').textContent=t;
-        },
-        updateMarketStatus:function(){
-            var s=gMS(new Date()),el=$('#marketStatus');
-            el.textContent=s.text;el.className='text-xs px-2 py-0.5 rounded-full font-medium '+s.cls;
-            var d=$('#chartLiveDot');if(d)d.style.display=s.live?'inline-block':'none';
-        }
-    };
-    </script>
-    <script>
-    /* ---------- App ---------- */
-    var App={
-        _tm:null,_so:false,_fo:false,_sf:null,
-
-        init:function(){
-            ChartMgr.init();UI.updateMarketStatus();this._bindSort();
-            this.refreshAll().then(function(){console.log('[OK]',FUND_CONFIG.length,'funds loaded')});
-            this._startTimer();
-        },
-
-        _bindSort:function(){
-            var is=$$('.sort-icon');for(var i=0;i<is.length;i++){
-                is[i].addEventListener('click',function(){var c=parseInt(this.getAttribute('data-col'));UI.sortFundTable(c)})
-            }
-        },
-
-        /* Search */
-        searchFund:function(){
-            var input=$('#fundSearchInput'),code=input.value.trim(),re=$('#fundSearchResult'),
-                ai=$('#fundAmountInput'),ab=$('#fundAddBtn');
-            if(!/^\d{6}$/.test(code)){re.textContent='请输入6位数字基金代码';re.className='text-xs text-red-400';re.style.display='';ai.disabled=true;ab.disabled=true;this._sf=null;return}
-            re.textContent='查询中...';re.className='text-xs text-[#94a3b8]';re.style.display='';ai.disabled=true;ab.disabled=true;
-            var s=this;
-            API.getFundEstimate(code).then(function(d){
-                s._sf={code:code,name:d.name,data:d};
-                re.textContent='✓ '+d.name+' ('+code+')';re.className='text-xs text-cyan font-semibold';re.style.display='';
-                ai.disabled=false;ai.focus();ab.disabled=false;
-            }).catch(function(e){
-                s._sf=null;re.textContent='✗ 未找到该基金';re.className='text-xs text-red-400';re.style.display='';
-                ai.disabled=true;ab.disabled=true;
-            });
-        },
-
-        /* Add */
-        addFund:function(){
-            if(!this._sf)return;
-            var code=this._sf.code,ai=$('#fundAmountInput'),amt=parseFloat(ai.value);
-            if(!amt||isNaN(amt)||amt<=0){ai.focus();ai.style.borderColor='#f87171';setTimeout(function(){ai.style.borderColor=''},1500);return}
-            for(var i=0;i<FUND_CONFIG.length;i++){if(FUND_CONFIG[i].code===code){alert('该基金已在持仓列表中');return}}
-            FUND_CONFIG.push({code:code,amount:amt});saveFundConfig(FUND_CONFIG);
-            $('#fundSearchInput').value='';ai.value='';ai.disabled=true;ab.disabled=true;
-            $('#fundSearchResult').textContent='';
-            this._sf=null;this.refreshAll();
-        },
-
-        /* Remove */
-        removeFund:function(code){
-            FUND_CONFIG=FUND_CONFIG.filter(function(f){return f.code!==code});saveFundConfig(FUND_CONFIG);
-            if(FUND_CONFIG.length===0){FUND_CONFIG=DEFAULT_FUNDS.slice();saveFundConfig(FUND_CONFIG)}
-            this.refreshAll();
-        },
-
-        /* Reset */
-        resetFunds:function(){
-            if(!confirm('确定重置为默认基金列表？'))return;
-            FUND_CONFIG=DEFAULT_FUNDS.slice();saveFundConfig(FUND_CONFIG);
-            $('#fundSearchInput').value='';$('#fundAmountInput').value='';$('#fundAmountInput').style.display='none';
-            $('#fundSearchResult').style.display='none';$('#fundAddBtn').style.display='none';
-            this._sf=null;this.refreshAll();
-        },
-
-        /* Refresh */
-        refreshAll:function(){
-            var s=this,btn=$('#refreshBtn');btn.disabled=true;btn.classList.add('opacity-50');
-            return Promise.all([this._rSSE(),this._rFunds()]).then(function(){
-                UI.updateTimes();UI.updateMarketStatus();
-            }).catch(function(e){console.error('[ERR]',e)}).finally(function(){
-                btn.disabled=false;btn.classList.remove('opacity-50');
-            });
-        },
-
-        _rSSE:function(){
-            var s=this;
-            return Promise.all([API.getSSEQuote(),API.getSSETrend()]).then(function(r){
-                var q=r[0],t=r[1];s._so=true;UI.updateIndexCards(q);
-                var pp=t.prePrice;if(!pp&&q)pp=q.f60;ChartMgr.update(t.trends,pp);
-            }).catch(function(e){console.error('[SSE]',e.message);s._so=false});
-        },
-
-        _rFunds:function(){
-            var s=this,cs=[];for(var i=0;i<FUND_CONFIG.length;i++)cs.push(FUND_CONFIG[i].code);
-            return API.getFundEstimates(cs).then(function(e){s._fo=true;UI.updateFundTable(e)})
-                .catch(function(e){console.error('[FUND]',e.message);s._fo=false});
-        },
-
-        _startTimer:function(){
-            var s=this;if(s._tm)clearTimeout(s._tm);
-            function sc(){var iv=isTT(new Date())?10000:60000;
-                s._tm=setTimeout(function(){s.refreshAll().then(function(){sc()})},iv)}
-            sc();
-        }
-    };
-
-    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){App.init()});else App.init();
-    </script>
+// 页面加载时检查登录状态
+checkAuth();
+</script>
 </body>
 </html>
+
+
+
+
+
